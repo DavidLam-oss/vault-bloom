@@ -141,6 +141,12 @@ export class ThreeRenderer implements GraphRenderer {
 		this.controls = new OrbitControls(this.camera, three.domElement);
 		this.controls.enableDamping = true;
 		this.controls.dampingFactor = 0.08;
+		// Zoom toward the POINTER, not screen center: dolly toward a fixed
+		// target stops when the camera reaches it, so off-center notes
+		// could never be zoomed into (3d-force-graph parity).
+		this.controls.zoomToCursor = true;
+		this.controls.minDistance = 2;
+		this.controls.maxDistance = 6000;
 		// Ecosystem convention (obsidian-3d-graph / 3d-force-graph):
 		// left-drag rotates, Cmd/Ctrl+left-drag and right-drag pan.
 		// The modifier swap happens per-event in onMouseButtonMode.
@@ -230,7 +236,7 @@ export class ThreeRenderer implements GraphRenderer {
 				if (d > radius) radius = d;
 			}
 		}
-		const dist = radius * 2.1;
+		const dist = radius * 1.85;
 		this.camera.position.set(dist * 0.62, dist * 0.46, dist * 0.62);
 		this.camera.lookAt(0, 0, 0);
 		this.controls.target.set(0, 0, 0);
@@ -776,6 +782,7 @@ export class ThreeRenderer implements GraphRenderer {
 				this.positionsDirty = false;
 			}
 			this.flow?.update(dt, this.layout.nodes);
+			this.flow?.applyCameraDistance(this.camera, this.controls, this.layout.estimateRadius());
 			if (this.fly?.active) this.fly.tick();
 			else this.controls?.update();
 			this.three.render(this.scene!, this.camera!);

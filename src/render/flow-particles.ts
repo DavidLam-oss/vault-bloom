@@ -218,6 +218,29 @@ export class FlowLayer {
 		}
 	}
 
+	/**
+	 * LOD fade driven by camera distance: additive blending saturates to
+	 * white where particles pile up, so from overview distance the whole
+	 * flow layer dims; close reading distance restores full strength.
+	 */
+	applyCameraDistance(
+		camera: { position: { x: number; y: number; z: number } } | null,
+		controls: { target: { x: number; y: number; z: number } } | null,
+		graphRadius: number
+	): void {
+		if (!camera || !controls) return;
+		const dist = Math.hypot(
+			camera.position.x - controls.target.x,
+			camera.position.y - controls.target.y,
+			camera.position.z - controls.target.z
+		);
+		const radius = Math.max(60, graphRadius);
+		// Overview distance (~2x radius) -> 0.22; near (<= ~0.2 radius) -> 1.
+		const f = Math.min(1, Math.max(0.22, 1.55 - dist / (radius * 1.4)));
+		if (this.pointMat) this.pointMat.opacity = f;
+		if (this.tendrilMat) this.tendrilMat.opacity = 0.15 * f;
+	}
+
 	/** Module focus: dim particles whose segment leaves the member set. */
 	setFocusDim(members: Set<string> | null): void {
 		for (let i = 0; i < this.segs.length; i++) {
