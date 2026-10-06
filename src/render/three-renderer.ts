@@ -28,9 +28,9 @@ import type { GraphNode, NeuralGraph } from "../data/types";
 import { CameraFly } from "./camera-tween";
 import { boundsOf, expandedVisible, focusMembers, paintFocusDim } from "./focus-paint";
 import { FlowLayer, buildFlowSegments } from "./flow-particles";
+import { paintSlots, restoreSlots } from "./paint";
 import { ForceLayout } from "./layout";
-import { nodeScale } from "./slot";
-import type { Slot } from "./slot";
+import { nodeScale, type Slot } from "./slot";
 import type {
 	GraphRenderer,
 	HubHoverInfo,
@@ -41,7 +41,7 @@ import type {
 const BACKGROUND = 0x0b0f17;
 const LINK_COLOR = new Color(0x39435c);
 const GHOST_EDGE_COLOR = new Color(0x514583);
-const HIGHLIGHT_COLOR = new Color(0xffffff);
+const HIGHLIGHT_COLOR = new Color(0xffd47f);
 const NEIGHBOR_COLOR = new Color(0xd8e6ff);
 const GHOST_COLOR = new Color(0x8f83e0);
 const LINK_FLOW_COLOR = new Color(0x9db4e6);
@@ -558,6 +558,8 @@ export class ThreeRenderer implements GraphRenderer {
 		// the capture phase genuinely precedes the target.
 		const swapHost = this.host ?? el;
 		swapHost.addEventListener("pointerdown", this.onMouseButtonMode, true);
+		// Wheel reclaims the camera from flight/orbit before OrbitControls sees it.
+		swapHost.addEventListener("wheel", this.onWheelCapture, true);
 		el.addEventListener("pointermove", this.onPointerMove);
 		el.addEventListener("pointerdown", this.onPointerDown);
 		el.addEventListener("pointerup", this.onPointerUp);
@@ -613,18 +615,37 @@ export class ThreeRenderer implements GraphRenderer {
 		if (this.hover) this.flyToNode(this.hover);
 	};
 
+	private onWheelCapture = (): void => {
+		if (this.fly?.busy) this.fly.cancel();
+	};
+
 	private onDoubleClick = (e: MouseEvent): void => {
 		const { node, hub } = this.pickAt(e);
 		if (node && (!hub || node.dist <= hub.dist)) this.cb.onNodeOpen?.(node.slot.node);
 	};
 
-	/** Fly the camera over to frame one node (see CameraFly.flyToNode). */
+	/** Fly to frame one node; the arrival orbit sweeps toward its neighbors. */
 	private flyToNode(slot: Slot): void {
 		if (!this.fly) return;
 		const sim = this.layout.nodes[this.slots.indexOf(slot)];
 		if (!sim) return;
+		const pos = new Vector3(sim.x, sim.y, sim.z);
 		const r = slot.mesh === "ghost" ? 0.9 : nodeScale(slot.node.degree);
-		this.fly.flyToNode(new Vector3(sim.x, sim.y, sim.z), r);
+		this.fly.flyToNode(pos, r, this.densityBias(slot.node.id, pos));
+	}
+
+	/** Mean direction from the node to its rendered neighbors. */
+	private densityBias(nodeId: string, from: Vector3): Vector3 | null {
+		const ids = this.neighbors.get(nodeId);
+		if (!ids || ids.length === 0) return null;
+		const acc = new Vector3();
+		let n = 0;
+		this.slots.forEach((slot, i) => {
+			if (!slot || !ids.includes(slot.node.id)) return;
+			const p = this.layout.nodes[i];
+			if (p) { acc.x += p.x; acc.y += p.y; acc.z += p.z; n++; }
+		});
+		return n === 0 ? null : acc.divideScalar(n).sub(from);
 	}
 
 	private onPointerLeave = (): void => {
@@ -698,8 +719,8 @@ export class ThreeRenderer implements GraphRenderer {
 			const slot = this.slotById.get(id);
 			if (slot) this.hoverNeighbors.push(slot);
 		}
-		this.paint([pick], HIGHLIGHT_COLOR);
-		this.paint(this.hoverNeighbors, NEIGHBOR_COLOR);
+		paintSlots(this.noteMesh, this.ghostMesh, [pick], HIGHLIGHT_COLOR);
+		paintSlots(this.noteMesh, this.ghostMesh, this.hoverNeighbors, NEIGHBOR_COLOR);
 	}
 
 	private applyHubHover(pick: { moduleId: string; count: number }): void {
@@ -717,7 +738,7 @@ export class ThreeRenderer implements GraphRenderer {
 	private clearHover(): void {
 		const had = this.hover !== null;
 		if (had) {
-			this.restore([this.hover as Slot, ...this.hoverNeighbors]);
+			restoreSlots(this.noteMesh, this.ghostMesh, [this.hover as Slot, ...this.hoverNeighbors], this.noteBase, this.ghostBase);
 			this.flow?.accelerate(null);
 		}
 		this.hover = null;
@@ -730,27 +751,6 @@ export class ThreeRenderer implements GraphRenderer {
 			this.hubHover = null;
 			this.hubAnnounced = false;
 			this.cb.onHubHover?.(null);
-		}
-	}
-
-	private paint(refs: Slot[], color: Color): void {
-		for (const ref of refs) {
-			const mesh = ref.mesh === "note" ? this.noteMesh : this.ghostMesh;
-			mesh?.setColorAt(ref.local, color);
-		}
-		if (this.noteMesh?.instanceColor) this.noteMesh.instanceColor.needsUpdate = true;
-		if (this.ghostMesh?.instanceColor) this.ghostMesh.instanceColor.needsUpdate = true;
-	}
-
-	private restore(refs: Slot[]): void {
-		for (const ref of refs) {
-			const base = ref.mesh === "note" ? this.noteBase : this.ghostBase;
-			if (base.length === 0) continue;
-			this.paint([ref], new Color(
-				base[ref.local * 3],
-				base[ref.local * 3 + 1],
-				base[ref.local * 3 + 2]
-			));
 		}
 	}
 
@@ -782,7 +782,7 @@ export class ThreeRenderer implements GraphRenderer {
 			}
 			this.flow?.update(dt, this.layout.nodes);
 			this.flow?.applyCameraDistance(this.camera, this.controls, this.layout.estimateRadius());
-			if (this.fly?.active) this.fly.tick();
+			if (this.fly?.busy) this.fly.tick(dt);
 			else this.controls?.update();
 			this.three.render(this.scene!, this.camera!);
 		};
