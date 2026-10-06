@@ -88,6 +88,39 @@
 	color: #ffffff;
 }
 
+.nv-backbtn {
+	position: absolute;
+	top: 10px;
+	left: 10px;
+	z-index: 3;
+	display: none;
+	padding: 5px 12px;
+	border-radius: 8px;
+	border: 1px solid rgba(96, 116, 156, 0.45);
+	background-color: rgba(11, 15, 23, 0.78);
+	color: #c8d3e8;
+	font-size: 0.85em;
+	cursor: pointer;
+	user-select: none;
+}
+
+.nv-backbtn.nv-visible {
+	display: block;
+}
+
+.nv-backbtn:hover {
+	color: #ffffff;
+	border-color: #8fa2c8;
+}
+
+.nv-module-table tr.nv-module-row {
+	cursor: pointer;
+}
+
+.nv-module-table tr.nv-module-row:hover td {
+	background-color: var(--background-secondary);
+}
+
 .nv-actions {
 	display: flex;
 	gap: 8px;

@@ -6,7 +6,7 @@ import { ItemView, Notice, WorkspaceLeaf } from "obsidian";
 import type NeuralVaultPlugin from "../main";
 import { GraphNode } from "../data/types";
 import { ThreeRenderer } from "../render/three-renderer";
-import type { RendererOptions } from "../render/renderer";
+import type { HubHoverInfo, RendererOptions } from "../render/renderer";
 
 export const VIEW_TYPE_VAULT_BLOOM = "vault-bloom-dashboard";
 
@@ -20,6 +20,7 @@ export class DashboardView extends ItemView {
 	private moduleTableBody: HTMLElement | null = null;
 	private topListEl: HTMLElement | null = null;
 	private hoverBar: HTMLElement | null = null;
+	private backBtn: HTMLElement | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: NeuralVaultPlugin) {
 		super(leaf);
@@ -69,11 +70,17 @@ export class DashboardView extends ItemView {
 		// Canvas first: the dashboard is a renderer with stats underneath.
 		const canvasWrap = contentEl.createDiv("nv-canvas-wrap");
 		this.hoverBar = canvasWrap.createDiv("nv-hoverbar");
-		this.hoverBar.setText("Left-drag rotate · Cmd+drag or right-drag pan · Scroll zoom · Click note to open");
+		this.hoverBar.setText("Left-drag rotate · Cmd+drag or right-drag pan · Scroll zoom · Click a glowing hub to focus its module");
+
+		this.backBtn = canvasWrap.createDiv("nv-backbtn");
+		this.backBtn.setText("← Back to overview (Esc)");
+		this.backBtn.addEventListener("click", () => this.renderer?.clearFocus());
 
 		this.renderer = new ThreeRenderer({
 			onNodeClick: (node) => this.openNode(node),
 			onNodeHover: (node) => this.showHover(node),
+			onModuleFocus: (moduleId) => this.onFocusChange(moduleId),
+			onHubHover: (hub) => this.showHubHover(hub),
 		});
 		this.renderer.mount(canvasWrap);
 
@@ -128,7 +135,8 @@ export class DashboardView extends ItemView {
 		if (this.moduleTableBody) {
 			this.moduleTableBody.empty();
 			for (const def of graph.modules) {
-				const row = this.moduleTableBody.createEl("tr");
+				const row = this.moduleTableBody.createEl("tr", { cls: "nv-module-row" });
+				row.addEventListener("click", () => this.renderer?.focusModule(def.id));
 				const nameCell = row.createEl("td");
 				const dot = nameCell.createEl("span", { cls: "nv-module-dot" });
 				dot.style.backgroundColor = def.color;
@@ -181,7 +189,11 @@ export class DashboardView extends ItemView {
 	private showHover(node: GraphNode | null): void {
 		if (!this.hoverBar) return;
 		if (!node) {
-			this.hoverBar.setText("Hover a node to inspect it");
+			this.hoverBar.setText(
+				this.renderer?.getFocusedModule()
+					? "Module focus - click the hub again or press Esc to go back"
+					: "Hover a node to inspect it"
+			);
 			this.hoverBar.removeClass("nv-hoverbar-active");
 			return;
 		}
@@ -193,5 +205,31 @@ export class DashboardView extends ItemView {
 			: `${node.title} - ${moduleDef?.name ?? node.moduleId} - ${node.degree} links`;
 		this.hoverBar.setText(label);
 		this.hoverBar.addClass("nv-hoverbar-active");
+	}
+
+	private showHubHover(hub: HubHoverInfo | null): void {
+		if (!this.hoverBar) return;
+		if (!hub) {
+			this.hoverBar.setText("Hover a node to inspect it");
+			this.hoverBar.removeClass("nv-hoverbar-active");
+			return;
+		}
+		this.hoverBar.setText(
+			`Module: ${hub.name} · ${hub.count} notes · click to focus`
+		);
+		this.hoverBar.addClass("nv-hoverbar-active");
+	}
+
+	private onFocusChange(moduleId: string | null): void {
+		this.backBtn?.toggleClass("nv-visible", moduleId !== null);
+		if (moduleId && this.hoverBar) {
+			const def = this.plugin.currentGraph?.modules.find(
+				(m) => m.id === moduleId
+			);
+			this.hoverBar.setText(
+				`Focused: ${def?.name ?? moduleId} · Esc or "Back" to return`
+			);
+			this.hoverBar.addClass("nv-hoverbar-active");
+		}
 	}
 }

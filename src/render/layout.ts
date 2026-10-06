@@ -55,6 +55,8 @@ export class ForceLayout {
 
 	private lastHubRadius = 0;
 	private lastMaxSize = 1;
+	/** hub positions of the most recent update(), exposed for hub rendering */
+	private lastHubs = new Map<string, Hub>();
 
 	/**
 	 * (Re)build the simulation for the current visible subgraph.
@@ -79,6 +81,7 @@ export class ForceLayout {
 		const maxSize = Math.max(1, ...sizes.values());
 		this.lastMaxSize = maxSize;
 		const hubs = this.computeHubs([...sizes.keys()], maxSize);
+		this.lastHubs = hubs;
 
 		// Nodes.
 		const previousIds = new Set(this.nodes.map((n) => n.id));
@@ -216,6 +219,11 @@ export class ForceLayout {
 	 */
 	estimateRadius(): number {
 		return this.lastHubRadius + 4 * Math.sqrt(this.lastMaxSize) + 80;
+	}
+
+	/** Hub (cluster center) positions from the most recent update(). */
+	getHubs(): Map<string, Hub> {
+		return this.lastHubs;
 	}
 
 	private computeHubs(moduleIds: string[], maxSize: number): Map<string, Hub> {

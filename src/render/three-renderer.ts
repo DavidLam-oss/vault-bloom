@@ -15,6 +15,7 @@ import {
 	LineBasicMaterial,
 	LineSegments,
 	Matrix4,
+	Mesh,
 	MOUSE,
 	MeshBasicMaterial,
 	PerspectiveCamera,
@@ -22,12 +23,20 @@ import {
 	Scene,
 	SphereGeometry,
 	Vector2,
+	Vector3,
 	WebGLRenderer,
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { GraphNode, NeuralGraph } from "../data/types";
+import { CameraFly } from "./camera-tween";
+import { boundsOf, expandedVisible, focusMembers, paintFocusDim } from "./focus-paint";
 import { ForceLayout } from "./layout";
-import type { GraphRenderer, RendererCallbacks, RendererOptions } from "./renderer";
+import type {
+	GraphRenderer,
+	HubHoverInfo,
+	RendererCallbacks,
+	RendererOptions,
+} from "./renderer";
 
 const BACKGROUND = 0x0b0f17;
 const LINK_COLOR = new Color(0x39435c);
@@ -79,11 +88,26 @@ export class ThreeRenderer implements GraphRenderer {
 	private hover: Slot | null = null;
 	private hoverNeighbors: Slot[] = [];
 	private hoverAnnounced = false;
+	private hubHover: { moduleId: string; count: number } | null = null;
+	private hubAnnounced = false;
 	private pointerDownAt: Vector2 | null = null;
 	private paused = false;
 	private inViewport = true;
 	private positionsDirty = false;
 	private colorModule = new Map<string, Color>();
+
+	// --- module focus (drill-down) state ------------------------------------
+	private graph: NeuralGraph | null = null;
+	private options: RendererOptions = { showOrphans: false, showGhosts: false };
+	/** visible node ids in the un-focused overview state */
+	private overviewVisible = new Set<string>();
+	private focusedModule: string | null = null;
+	/** clickable cluster-center markers, one per module */
+	private hubMeshes: Array<{ mesh: Mesh; moduleId: string; count: number }> = [];
+	/** per-vertex edge colors before focus dimming (parallel to edgeLines) */
+	private edgeBaseColors: Float32Array | null = null;
+	private fly: CameraFly | null = null;
+	private lastPointer = { x: -1, y: -1 };
 
 	constructor(cb: RendererCallbacks) {
 		this.cb = cb;
@@ -119,6 +143,7 @@ export class ThreeRenderer implements GraphRenderer {
 			MIDDLE: MOUSE.DOLLY,
 			RIGHT: MOUSE.PAN,
 		};
+		this.fly = new CameraFly(this.camera, this.controls);
 
 		this.bindPointerEvents();
 
@@ -138,13 +163,23 @@ export class ThreeRenderer implements GraphRenderer {
 	setData(graph: NeuralGraph, options: RendererOptions): void {
 		if (!this.scene) return;
 
+		this.graph = graph;
+		this.options = options;
+		// A data rebuild always lands back in the overview (predictable).
+		if (this.focusedModule) {
+			this.focusedModule = null;
+			this.cb.onModuleFocus?.(null);
+		}
+
 		// Visible subgraph per settings.
-		const visibleIds = new Set<string>();
+		this.overviewVisible = new Set<string>();
 		for (const node of graph.nodes) {
 			if (node.kind === "note") {
-				if (node.degree > 0 || options.showOrphans) visibleIds.add(node.id);
+				if (node.degree > 0 || options.showOrphans) {
+					this.overviewVisible.add(node.id);
+				}
 			} else if (node.kind === "ghost" && options.showGhosts) {
-				visibleIds.add(node.id);
+				this.overviewVisible.add(node.id);
 			}
 		}
 
@@ -154,8 +189,8 @@ export class ThreeRenderer implements GraphRenderer {
 		}
 
 		const coldStart = this.layout.nodes.length === 0;
-		this.layout.update(graph, visibleIds);
-		this.layout.pruneCache(visibleIds);
+		this.layout.update(graph, this.overviewVisible);
+		this.layout.pruneCache(this.overviewVisible);
 
 		this.rebuildSceneObjects(graph);
 		this.clearHover();
@@ -175,6 +210,11 @@ export class ThreeRenderer implements GraphRenderer {
 	 */
 	fitView(useEstimate = false): void {
 		if (!this.camera || !this.controls) return;
+		// "Fit view" during a module focus means: back to the overview.
+		if (this.focusedModule) {
+			this.clearFocus();
+			return;
+		}
 		let radius = 100;
 		if (useEstimate) {
 			radius = Math.max(100, this.layout.estimateRadius());
@@ -196,12 +236,74 @@ export class ThreeRenderer implements GraphRenderer {
 		this.controls.update();
 	}
 
+	// --- module focus (drill-down) -------------------------------------------
+
+	focusModule(moduleId: string): void {
+		if (!this.graph || !this.scene || !this.fly) return;
+		this.clearHover();
+		this.focusedModule = moduleId;
+
+		// Lazy-expand: overview set + every member note (orphans included)
+		// + the ghosts hanging off members. Existing nodes stay pinned via
+		// the position cache; only the freshly expanded ones simulate in.
+		const members = focusMembers(this.graph, this.options, moduleId);
+		this.layout.update(this.graph, expandedVisible(this.overviewVisible, members));
+		// Deliberately no pruneCache: leaving focus keeps expanded positions
+		// warm so re-entering the same module doesn't reshuffle it.
+		this.rebuildSceneObjects(this.graph);
+		paintFocusDim(
+			members, this.slots, this.noteBase, this.ghostBase,
+			this.noteMesh, this.ghostMesh, this.layout,
+			this.edgeLines, this.edgeBaseColors
+		);
+		this.positionsDirty = true;
+
+		const bounds = boundsOf(this.layout.nodes, members)
+			?? boundsOf(this.layout.nodes, null);
+		if (bounds) this.flyTo(bounds, 2.4);
+		this.cb.onModuleFocus?.(moduleId);
+	}
+
+	clearFocus(): void {
+		if (!this.focusedModule || !this.graph) return;
+		this.focusedModule = null;
+		this.clearHover();
+		this.layout.update(this.graph, this.overviewVisible);
+		// rebuildSceneObjects restores full-strength base colors and edges.
+		this.rebuildSceneObjects(this.graph);
+		this.positionsDirty = true;
+		this.flyTo(boundsOf(this.layout.nodes, null), 2.1);
+		this.cb.onModuleFocus?.(null);
+	}
+
+	getFocusedModule(): string | null {
+		return this.focusedModule;
+	}
+
+	/** Keep the current view direction, back off to frame the bounds. */
+	private flyTo(bounds: { center: Vector3; radius: number } | null, fitFactor: number): void {
+		if (!bounds || !this.camera || !this.controls || !this.fly) return;
+		const dir = this.camera.position.clone().sub(this.controls.target);
+		if (dir.lengthSq() < 1e-6) dir.set(0.62, 0.46, 0.62);
+		dir.normalize();
+		const pos = bounds.center.clone().add(dir.multiplyScalar(bounds.radius * fitFactor));
+		this.fly.flyTo(bounds.center, pos, 700);
+		const fog = this.scene?.fog;
+		if (fog instanceof Fog) {
+			const dist = bounds.radius * fitFactor;
+			fog.near = dist * 0.9;
+			fog.far = dist * 5;
+		}
+	}
+
 	dispose(): void {
 		cancelAnimationFrame(this.raf);
 		this.raf = 0;
 		this.resizeObserver?.disconnect();
 		this.intersectionObserver?.disconnect();
+		window.removeEventListener("keydown", this.onKeyDown, true);
 		this.controls?.dispose();
+		this.fly = null;
 		this.disposeSceneObjects();
 		this.three?.dispose();
 		this.host?.remove();
@@ -284,6 +386,33 @@ export class ThreeRenderer implements GraphRenderer {
 			this.ghostMesh = mesh;
 		}
 
+		// Module hubs: clickable cluster anchors (Phase 2 swaps in jellyfish).
+		this.hubMeshes = [];
+		const noteCountByModule = new Map<string, number>();
+		for (const n of graph.nodes) {
+			if (n.kind !== "note") continue;
+			noteCountByModule.set(n.moduleId, (noteCountByModule.get(n.moduleId) ?? 0) + 1);
+		}
+		for (const [moduleId, hub] of this.layout.getHubs()) {
+			const count = noteCountByModule.get(moduleId) ?? 0;
+			const def = graph.modules.find((m) => m.id === moduleId);
+			const scale = 7 + 2.0 * Math.sqrt(Math.max(1, count));
+			const mesh = new Mesh(
+				new SphereGeometry(1, 20, 14),
+				new MeshBasicMaterial({
+					color: new Color(def?.color ?? "#888780"),
+					transparent: true,
+					opacity: 0.45,
+					depthWrite: false,
+					toneMapped: false,
+				})
+			);
+			mesh.position.set(hub.x, hub.y, hub.z);
+			mesh.scale.setScalar(scale);
+			this.scene.add(mesh);
+			this.hubMeshes.push({ mesh, moduleId, count });
+		}
+
 		// Edges: one LineSegments with per-vertex colors (ghost edges dimmer).
 		const edgeCount = this.layout.edges.length;
 		if (edgeCount > 0) {
@@ -310,6 +439,7 @@ export class ThreeRenderer implements GraphRenderer {
 				opacity: 0.5,
 				depthWrite: false,
 			});
+			this.edgeBaseColors = colors.slice();
 			this.edgeLines = new LineSegments(geometry, material);
 			this.scene.add(this.edgeLines);
 		}
@@ -335,6 +465,12 @@ export class ThreeRenderer implements GraphRenderer {
 		this.noteMesh = null;
 		this.ghostMesh = null;
 		this.edgeLines = null;
+		for (const hub of this.hubMeshes) {
+			this.scene?.remove(hub.mesh);
+			hub.mesh.geometry.dispose();
+			(hub.mesh.material as MeshBasicMaterial).dispose();
+		}
+		this.hubMeshes = [];
 	}
 
 	// --- per-frame sync -----------------------------------------------------
@@ -387,6 +523,28 @@ export class ThreeRenderer implements GraphRenderer {
 		el.addEventListener("pointerdown", this.onPointerDown);
 		el.addEventListener("pointerup", this.onPointerUp);
 		el.addEventListener("pointerleave", this.onPointerLeave);
+		// Esc leaves module focus. Key events target the focused element
+		// (usually body), so the host can never be an ancestor — the only
+		// working spot is window capture, gated on "pointer over canvas".
+		window.addEventListener("keydown", this.onKeyDown, true);
+	}
+
+	/** Esc = back to overview, but ONLY while the pointer is over the canvas. */
+	private onKeyDown = (e: KeyboardEvent): void => {
+		if (e.key !== "Escape" || !this.focusedModule) return;
+		if (!this.pointerOverCanvas()) return;
+		e.preventDefault();
+		e.stopPropagation();
+		this.clearFocus();
+	};
+
+	/** True when the pointer currently sits anywhere over our canvas host. */
+	private pointerOverCanvas(): boolean {
+		if (!this.host) return false;
+		if (this.host.matches(":hover")) return true;
+		if (this.lastPointer.x < 0) return false;
+		const el = document.elementFromPoint(this.lastPointer.x, this.lastPointer.y);
+		return el instanceof Node && this.host.contains(el);
 	}
 
 	/** Cmd/Ctrl+left-drag pans (obsidian-3d-graph convention); plain left-drag rotates. */
@@ -397,14 +555,21 @@ export class ThreeRenderer implements GraphRenderer {
 
 	private onPointerDown = (e: PointerEvent): void => {
 		this.pointerDownAt = new Vector2(e.clientX, e.clientY);
+		this.fly?.cancel(); // grabbing the canvas hands camera control back
 	};
 
 	private onPointerUp = (e: PointerEvent): void => {
 		const down = this.pointerDownAt;
 		this.pointerDownAt = null;
-		if (!down || !this.hover) return;
+		if (!down) return;
 		if (down.distanceTo(new Vector2(e.clientX, e.clientY)) > 6) return;
-		this.cb.onNodeClick?.(this.hover.node);
+		if (this.hubHover) {
+			// Click a hub to focus; click it again to leave; another hub swaps.
+			if (this.focusedModule === this.hubHover.moduleId) this.clearFocus();
+			else this.focusModule(this.hubHover.moduleId);
+			return;
+		}
+		if (this.hover) this.cb.onNodeClick?.(this.hover.node);
 	};
 
 	private onPointerLeave = (): void => {
@@ -413,6 +578,8 @@ export class ThreeRenderer implements GraphRenderer {
 	};
 
 	private onPointerMove = (e: PointerEvent): void => {
+		this.lastPointer.x = e.clientX;
+		this.lastPointer.y = e.clientY;
 		const el = this.three?.domElement;
 		if (!el || !this.camera) return;
 		const rect = el.getBoundingClientRect();
@@ -424,7 +591,8 @@ export class ThreeRenderer implements GraphRenderer {
 			this.camera
 		);
 
-		let best: { slot: Slot; dist: number } | null = null;
+		// Nearest hit across notes, ghosts and module hubs.
+		let bestNode: { slot: Slot; dist: number } | null = null;
 		// O(1) instanceId -> slot lookup via the per-mesh reverse index.
 		for (const [mesh, kind] of [
 			[this.noteMesh, "note"],
@@ -435,15 +603,28 @@ export class ThreeRenderer implements GraphRenderer {
 				if (hit.instanceId === undefined) continue;
 				const slot = this.slotByLocal(kind, hit.instanceId);
 				if (!slot) continue;
-				if (!best || hit.distance < best.dist) {
-					best = { slot, dist: hit.distance };
+				if (!bestNode || hit.distance < bestNode.dist) {
+					bestNode = { slot, dist: hit.distance };
+				}
+			}
+		}
+		let bestHub: { moduleId: string; count: number; dist: number } | null = null;
+		for (const hub of this.hubMeshes) {
+			for (const hit of this.raycaster.intersectObject(hub.mesh)) {
+				if (!bestHub || hit.distance < bestHub.dist) {
+					bestHub = { moduleId: hub.moduleId, count: hub.count, dist: hit.distance };
 				}
 			}
 		}
 
-		if (best?.slot.node.id === this.hover?.node.id) return;
+		if (bestHub && (!bestNode || bestHub.dist < bestNode.dist)) {
+			this.clearHover();
+			this.applyHubHover(bestHub);
+			return;
+		}
+		if (bestNode?.slot.node.id === this.hover?.node.id) return;
 		this.clearHover();
-		if (best) this.applyHover(best.slot);
+		if (bestNode) this.applyHover(bestNode.slot);
 	};
 
 	private slotByLocal(kind: "note" | "ghost", local: number): Slot | null {
@@ -469,6 +650,18 @@ export class ThreeRenderer implements GraphRenderer {
 		this.paint(this.hoverNeighbors, NEIGHBOR_COLOR);
 	}
 
+	private applyHubHover(pick: { moduleId: string; count: number }): void {
+		this.hubHover = pick;
+		this.hubAnnounced = true;
+		const def = this.graph?.modules.find((m) => m.id === pick.moduleId);
+		this.cb.onHubHover?.({
+			moduleId: pick.moduleId,
+			name: def?.name ?? pick.moduleId,
+			color: def?.color ?? "#888780",
+			count: pick.count,
+		});
+	}
+
 	private clearHover(): void {
 		const had = this.hover !== null;
 		if (had) {
@@ -479,6 +672,11 @@ export class ThreeRenderer implements GraphRenderer {
 		if (this.hoverAnnounced) {
 			this.hoverAnnounced = false;
 			this.cb.onNodeHover?.(null);
+		}
+		if (this.hubHover || this.hubAnnounced) {
+			this.hubHover = null;
+			this.hubAnnounced = false;
+			this.cb.onHubHover?.(null);
 		}
 	}
 
@@ -524,7 +722,8 @@ export class ThreeRenderer implements GraphRenderer {
 				this.syncPositions();
 				this.positionsDirty = false;
 			}
-			this.controls?.update();
+			if (this.fly?.active) this.fly.tick();
+			else this.controls?.update();
 			this.three.render(this.scene!, this.camera!);
 		};
 		this.raf = requestAnimationFrame(loop);

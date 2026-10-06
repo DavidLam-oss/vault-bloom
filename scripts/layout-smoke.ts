@@ -112,3 +112,38 @@ const jumped = before.filter((b, i) => {
 }).length;
 console.log("pinned-unchanged:", jumped === 0 ? "PASS" : `FAIL (${jumped} jumped)`);
 console.log("new-node-present:", layout.nodes.some((n) => n.id === "n-brand-new") ? "PASS" : "FAIL");
+
+// Module-focus simulation: collapse the visible set to one module's members
+// (what focusModule does), then expand back. Pinned nodes must not move and
+// nothing may go NaN — this is the drill-down path from Phase 1.
+const moduleAIds = new Set(
+	graph2.nodes
+		.filter((n) => n.moduleId === "a" || n.kind === "ghost")
+		.map((n) => n.id)
+);
+layout.update(graph2, moduleAIds);
+layout.prewarm();
+const collapsedFinite = layout.nodes.every(
+	(n) => Number.isFinite(n.x) && Number.isFinite(n.y) && Number.isFinite(n.z)
+);
+const collapsedCount = layout.nodes.length === moduleAIds.size;
+console.log(
+	"focus-collapse:",
+	collapsedFinite && collapsedCount ? "PASS" : `FAIL (finite=${collapsedFinite}, count=${layout.nodes.length}/${moduleAIds.size})`
+);
+
+// Expand back to the overview: positions of nodes that survived both ways
+// must be identical (they were pinned through the whole round trip).
+const pinnedIds = before.map((b) => b[0]).filter((id) => moduleAIds.has(id));
+layout.update(graph2, visible2);
+const roundTrip = pinnedIds.map((id) => {
+	const n0 = before.find((b) => b[0] === id)!;
+	const n1 = layout.nodes.find((x) => x.id === id);
+	const d = Math.hypot(n1!.x - n0[1], n1!.y - n0[2], n1!.z - n0[3]);
+	return d;
+});
+const roundTripJumps = roundTrip.filter((d) => d > 0.001).length;
+console.log(
+	"focus-roundtrip-pinned:",
+	roundTripJumps === 0 ? "PASS" : `FAIL (${roundTripJumps}/${pinnedIds.length} jumped)`
+);
