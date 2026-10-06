@@ -30,6 +30,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { GraphNode, NeuralGraph } from "../data/types";
 import { CameraFly } from "./camera-tween";
 import { boundsOf, expandedVisible, focusMembers, paintFocusDim } from "./focus-paint";
+import { FlowLayer, buildFlowSegments } from "./flow-particles";
 import { ForceLayout } from "./layout";
 import type {
 	GraphRenderer,
@@ -44,6 +45,8 @@ const GHOST_EDGE_COLOR = new Color(0x514583);
 const HIGHLIGHT_COLOR = new Color(0xffffff);
 const NEIGHBOR_COLOR = new Color(0xd8e6ff);
 const GHOST_COLOR = new Color(0x8f83e0);
+const LINK_FLOW_COLOR = new Color(0x9db4e6);
+const GHOST_FLOW_COLOR = new Color(0x8677c2);
 
 /** instance scale = base + sqrt(degree) * k, clamped */
 function nodeScale(degree: number): number {
@@ -107,6 +110,8 @@ export class ThreeRenderer implements GraphRenderer {
 	/** per-vertex edge colors before focus dimming (parallel to edgeLines) */
 	private edgeBaseColors: Float32Array | null = null;
 	private fly: CameraFly | null = null;
+	private flow: FlowLayer | null = null;
+	private lastFrame = 0;
 	private lastPointer = { x: -1, y: -1 };
 
 	constructor(cb: RendererCallbacks) {
@@ -128,6 +133,7 @@ export class ThreeRenderer implements GraphRenderer {
 		const scene = new Scene();
 		scene.fog = new Fog(BACKGROUND, 500, 2600);
 		this.scene = scene;
+		this.flow = new FlowLayer(scene);
 
 		this.camera = new PerspectiveCamera(55, 1, 0.1, 8000);
 		this.camera.position.set(260, 180, 260);
@@ -257,6 +263,7 @@ export class ThreeRenderer implements GraphRenderer {
 			this.edgeLines, this.edgeBaseColors
 		);
 		this.applyHubFocusVisuals(moduleId);
+		this.flow?.setFocusDim(members);
 		this.positionsDirty = true;
 
 		const bounds = boundsOf(this.layout.nodes, members)
@@ -324,6 +331,9 @@ export class ThreeRenderer implements GraphRenderer {
 		window.removeEventListener("keydown", this.onKeyDown, true);
 		this.controls?.dispose();
 		this.fly = null;
+		this.flow?.dispose();
+		this.flow = null;
+		this.lastFrame = 0;
 		this.disposeSceneObjects();
 		this.three?.dispose();
 		this.host?.remove();
@@ -462,6 +472,22 @@ export class ThreeRenderer implements GraphRenderer {
 			this.edgeBaseColors = colors.slice();
 			this.edgeLines = new LineSegments(geometry, material);
 			this.scene.add(this.edgeLines);
+		}
+
+		// Flow layer: particles on every edge + one tendril per hub member.
+		if (this.flow) {
+			this.flow.rebuild(
+				buildFlowSegments(
+					this.layout.nodes,
+					this.layout.edges,
+					nodeById,
+					this.layout.getHubs(),
+					moduleColor,
+					LINK_FLOW_COLOR,
+					GHOST_FLOW_COLOR
+				),
+				this.layout.nodes
+			);
 		}
 
 		// Neighbor map for hover highlighting (rendered nodes only).
@@ -661,6 +687,7 @@ export class ThreeRenderer implements GraphRenderer {
 		this.hover = pick;
 		this.hoverAnnounced = true;
 		this.cb.onNodeHover?.(pick.node);
+		this.flow?.accelerate(pick.node.id);
 		this.hoverNeighbors = [];
 		for (const id of this.neighbors.get(pick.node.id) ?? []) {
 			const slot = this.slotById.get(id);
@@ -686,6 +713,7 @@ export class ThreeRenderer implements GraphRenderer {
 		const had = this.hover !== null;
 		if (had) {
 			this.restore([this.hover as Slot, ...this.hoverNeighbors]);
+			this.flow?.accelerate(null);
 		}
 		this.hover = null;
 		this.hoverNeighbors = [];
@@ -737,11 +765,17 @@ export class ThreeRenderer implements GraphRenderer {
 		const loop = (): void => {
 			this.raf = requestAnimationFrame(loop);
 			if (this.paused || !this.inViewport || !this.three) return;
+			const now = performance.now();
+			const dt = this.lastFrame
+				? Math.min(0.05, (now - this.lastFrame) / 1000)
+				: 0;
+			this.lastFrame = now;
 			const hot = !this.layout.isCold() && this.layout.tick();
 			if (hot || this.positionsDirty) {
 				this.syncPositions();
 				this.positionsDirty = false;
 			}
+			this.flow?.update(dt, this.layout.nodes);
 			if (this.fly?.active) this.fly.tick();
 			else this.controls?.update();
 			this.three.render(this.scene!, this.camera!);
