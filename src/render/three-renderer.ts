@@ -139,7 +139,11 @@ export class ThreeRenderer implements GraphRenderer {
 			MIDDLE: MOUSE.DOLLY,
 			RIGHT: MOUSE.PAN,
 		};
-		this.fly = new CameraFly(this.camera, this.controls);
+		// Hold the orbit while aiming: pointer over a node, or over the
+		// focus card (overlays the canvas, so canvas :hover goes false).
+		this.fly = new CameraFly(this.camera, this.controls, () =>
+			this.hover !== null || (this.host?.matches(":hover") === true &&
+				this.three?.domElement?.matches(":hover") !== true));
 
 		this.bindPointerEvents();
 
@@ -611,9 +615,7 @@ export class ThreeRenderer implements GraphRenderer {
 		this.flyToNode(this.hover);
 	};
 
-	private onWheelCapture = (): void => {
-		if (this.fly?.busy) this.fly.cancel();
-	};
+	private onWheelCapture = (): void => { if (this.fly?.busy) this.fly.cancel(); };
 
 	private onDoubleClick = (e: MouseEvent): void => {
 		const { node, hub } = this.pickAt(e);

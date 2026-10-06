@@ -29,9 +29,15 @@ export class CameraFly {
 	private orbit: OrbitState | null = null;
 	private pendingOrbit: { center: Vector3; bias: Vector3 | null } | null = null;
 
+	/**
+	 * `holdProbe` returns true while the post-arrival orbit should freeze
+	 * (renderer: pointer over a node or over the focus card) so the user
+	 * can aim and click while the camera would otherwise be rotating.
+	 */
 	constructor(
 		private camera: PerspectiveCamera,
-		private controls: OrbitControls
+		private controls: OrbitControls,
+		private holdProbe: () => boolean = () => false
 	) {}
 
 	/** True while a flight is running (the render loop must skip controls.update). */
@@ -74,7 +80,11 @@ export class CameraFly {
 		this.pendingOrbit = { center: nodePos.clone(), bias };
 	}
 
-	/** Advance one frame; call every frame while busy. dt drives the orbit. */
+	/**
+	 * Advance one frame; call every frame while busy. dt drives the orbit;
+	 * the orbit skips its rotation while holdProbe() is true (camera
+	 * static, aiming possible) and resumes when the pointer moves off.
+	 */
 	tick(dt = 1 / 60): void {
 		const f = this.flight;
 		if (f) {
@@ -91,7 +101,7 @@ export class CameraFly {
 			this.camera.lookAt(this.controls.target);
 			return;
 		}
-		if (this.orbit) this.tickOrbit(dt);
+		if (this.orbit && !this.holdProbe()) this.tickOrbit(dt);
 	}
 
 	/** User grabbed the canvas or scrolled: hand the camera back immediately. */
