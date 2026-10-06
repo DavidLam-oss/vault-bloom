@@ -1,5 +1,4 @@
-// three.js renderer: GPU-instanced glowing nodes + line-segment edges, orbit
-// camera, hover-highlight, click-to-fly + focus card, module drill-down.
+// three.js renderer: instanced glowing nodes + line-segment edges, orbit camera, hover-highlight, click-to-fly + focus card, module drill-down.
 
 import {
 	BufferAttribute,
@@ -132,8 +131,7 @@ export class ThreeRenderer implements GraphRenderer {
 		this.controls.zoomToCursor = true;
 		this.controls.minDistance = 0.5;
 		this.controls.maxDistance = 6000;
-		// Ecosystem convention: left-drag rotates; Cmd/Ctrl+left and
-		// right-drag pan; the swap happens per-event in onMouseButtonMode.
+		// Ecosystem convention: left-drag rotates; Cmd/Ctrl+left or right-drag pans.
 		this.controls.mouseButtons = {
 			LEFT: MOUSE.ROTATE,
 			MIDDLE: MOUSE.DOLLY,
@@ -150,7 +148,6 @@ export class ThreeRenderer implements GraphRenderer {
 		this.resizeObserver = new ResizeObserver(() => this.applySize());
 		this.resizeObserver.observe(host);
 
-		// Stop rendering while the view sits in a background tab or folded pane.
 		this.intersectionObserver = new IntersectionObserver((entries) => {
 			this.inViewport = entries[0]?.isIntersecting ?? true;
 		});
@@ -165,13 +162,11 @@ export class ThreeRenderer implements GraphRenderer {
 
 		this.graph = graph;
 		this.options = options;
-		// A data rebuild always lands back in the overview (predictable).
 		if (this.focusedModule) {
 			this.focusedModule = null;
 			this.cb.onModuleFocus?.(null);
 		}
 
-		// Visible subgraph per settings.
 		this.overviewVisible = new Set<string>();
 		for (const node of graph.nodes) {
 			if (node.kind === "note") {
@@ -210,7 +205,6 @@ export class ThreeRenderer implements GraphRenderer {
 	 */
 	fitView(useEstimate = false): void {
 		if (!this.camera || !this.controls) return;
-		// "Fit view" during a module focus means: back to the overview.
 		if (this.focusedModule) {
 			this.clearFocus();
 			return;
@@ -347,7 +341,6 @@ export class ThreeRenderer implements GraphRenderer {
 		const moduleColor = (id: string): Color =>
 			this.colorModule.get(id) ?? new Color(0x888780);
 
-		// Layout order -> mesh slots.
 		const noteNodes: GraphNode[] = [];
 		const ghostNodes: GraphNode[] = [];
 		this.slots = [];
@@ -483,7 +476,6 @@ export class ThreeRenderer implements GraphRenderer {
 			);
 		}
 
-		// Neighbor map for hover highlighting (rendered nodes only).
 		this.neighbors.clear();
 		for (const edge of graph.edges) {
 			if (!this.slotById.has(edge.source) || !this.slotById.has(edge.target)) {
@@ -655,7 +647,7 @@ export class ThreeRenderer implements GraphRenderer {
 	};
 
 	/** Raycast notes/ghosts/hubs under a client position. */
-	private pickAt(at: { clientX: number; clientY: number }): {
+	private pickAt(at: { x: number; y: number }): {
 		node: { slot: Slot; dist: number } | null;
 		hub: { moduleId: string; count: number; dist: number } | null;
 	} {
@@ -664,8 +656,8 @@ export class ThreeRenderer implements GraphRenderer {
 		const rect = el.getBoundingClientRect();
 		this.raycaster.setFromCamera(
 			new Vector2(
-				((at.clientX - rect.left) / rect.width) * 2 - 1,
-				-((at.clientY - rect.top) / rect.height) * 2 + 1
+				((at.x - rect.left) / rect.width) * 2 - 1,
+				-((at.y - rect.top) / rect.height) * 2 + 1
 			),
 			this.camera
 		);
@@ -691,7 +683,13 @@ export class ThreeRenderer implements GraphRenderer {
 	private onPointerMove = (e: PointerEvent): void => {
 		this.lastPointer.x = e.clientX;
 		this.lastPointer.y = e.clientY;
-		const { node, hub } = this.pickAt(e);
+		this.pickAndHover();
+	};
+
+	/** Hover = whatever is under the pointer right now. Also re-run per
+	 *  frame while the camera moves: the scene shifts under a static cursor. */
+	private pickAndHover(): void {
+		const { node, hub } = this.pickAt(this.lastPointer);
 		if (hub && (!node || hub.dist < node.dist)) {
 			this.clearHover();
 			this.applyHubHover(hub);
@@ -700,7 +698,7 @@ export class ThreeRenderer implements GraphRenderer {
 		if (node?.slot.node.id === this.hover?.node.id) return;
 		this.clearHover();
 		if (node) this.applyHover(node.slot);
-	};
+	}
 
 	private slotByLocal(kind: "note" | "ghost", local: number): Slot | null {
 		const list = kind === "note" ? this.noteSlots : this.ghostSlots;
@@ -783,8 +781,10 @@ export class ThreeRenderer implements GraphRenderer {
 			}
 			this.flow?.update(dt, this.layout.nodes);
 			this.flow?.applyCameraDistance(this.camera, this.controls, this.layout.estimateRadius());
-			if (this.fly?.busy) this.fly.tick(dt);
-			else this.controls?.update();
+			if (this.fly?.busy) {
+				this.fly.tick(dt);
+				this.pickAndHover(); // camera moved under a static cursor
+			} else this.controls?.update();
 			this.three.render(this.scene!, this.camera!);
 		};
 		this.raf = requestAnimationFrame(loop);
