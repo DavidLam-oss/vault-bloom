@@ -1,4 +1,4 @@
-// Neural Vault - plugin entry.
+// Vault Bloom - plugin entry.
 
 import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
 import { buildGraph } from "./data/graph-builder";
@@ -10,7 +10,7 @@ import {
 	loadSettings,
 	saveSettings,
 } from "./settings/settings";
-import { DashboardView, VIEW_TYPE_NEURAL_VAULT } from "./view/dashboard-view";
+import { DashboardView, VIEW_TYPE_VAULT_BLOOM } from "./view/dashboard-view";
 
 export default class NeuralVaultPlugin extends Plugin {
 	settings!: NeuralVaultSettings;
@@ -23,17 +23,17 @@ export default class NeuralVaultPlugin extends Plugin {
 		this.settings = await loadSettings(this);
 
 		this.registerView(
-			VIEW_TYPE_NEURAL_VAULT,
+			VIEW_TYPE_VAULT_BLOOM,
 			(leaf: WorkspaceLeaf) => new DashboardView(leaf, this)
 		);
 
-		this.addRibbonIcon("orbit", "Open Neural Vault", () => {
+		this.addRibbonIcon("orbit", "Open Vault Bloom", () => {
 			void this.activateView();
 		});
 
 		this.addCommand({
 			id: "open-dashboard",
-			name: "Open neural vault dashboard",
+			name: "Open Vault Bloom dashboard",
 			callback: () => void this.activateView(),
 		});
 
@@ -42,7 +42,7 @@ export default class NeuralVaultPlugin extends Plugin {
 			name: "Rebuild graph",
 			callback: () => {
 				this.rebuildGraph();
-				new Notice("Neural Vault: graph rebuilt");
+				new Notice("Vault Bloom: graph rebuilt");
 			},
 		});
 
@@ -70,7 +70,7 @@ export default class NeuralVaultPlugin extends Plugin {
 		this.currentGraph = buildGraph(this.app, this.settings.modules, resolver);
 		const ms = Math.round(performance.now() - started);
 		console.log(
-			`Neural Vault: ${this.currentGraph.snapshot.noteCount} notes, ` +
+			`Vault Bloom: ${this.currentGraph.snapshot.noteCount} notes, ` +
 			`${this.currentGraph.snapshot.edgeCount} edges in ${ms}ms`
 		);
 	}
@@ -93,7 +93,7 @@ export default class NeuralVaultPlugin extends Plugin {
 	}
 
 	private withOpenView(fn: (view: DashboardView) => void): void {
-		const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_NEURAL_VAULT)[0];
+		const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_VAULT_BLOOM)[0];
 		if (leaf && leaf.view instanceof DashboardView) {
 			fn(leaf.view);
 		}
@@ -101,13 +101,13 @@ export default class NeuralVaultPlugin extends Plugin {
 
 	async activateView(): Promise<void> {
 		const { workspace } = this.app;
-		const existing = workspace.getLeavesOfType(VIEW_TYPE_NEURAL_VAULT);
+		const existing = workspace.getLeavesOfType(VIEW_TYPE_VAULT_BLOOM);
 		if (existing.length > 0) {
 			void workspace.revealLeaf(existing[0]);
 			return;
 		}
 		const leaf = workspace.getLeaf("tab");
-		await leaf.setViewState({ type: VIEW_TYPE_NEURAL_VAULT, active: true });
+		await leaf.setViewState({ type: VIEW_TYPE_VAULT_BLOOM, active: true });
 		void workspace.revealLeaf(leaf);
 	}
 }

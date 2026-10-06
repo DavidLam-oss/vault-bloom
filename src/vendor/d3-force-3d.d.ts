@@ -1,5 +1,5 @@
 // d3-force-3d ships no type declarations. This shim covers the subset of the
-// API Neural Vault uses (3D simulation with link / charge / directional
+// API Vault Bloom uses (3D simulation with link / charge / directional
 // forces). Typed loosely on purpose: forces are consumed fluently.
 
 declare module "d3-force-3d" {

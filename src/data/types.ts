@@ -1,4 +1,4 @@
-// Neural Vault - graph data model.
+// Vault Bloom - graph data model.
 // Bottom layer follows the native Obsidian graph model: nodes are files,
 // edges are [[wikilinks]], tags optional, orphan notes toggleable.
 // The "module" concept (jellyfish hubs) lives in the grouping layer.

@@ -1,16 +1,16 @@
 // Copy build artifacts into the Obsidian vault plugin directory so the plugin
-// can be reloaded for testing. Override the target with NEURAL_VAULT_TARGET.
+// can be reloaded for testing. Override the target with VAULT_BLOOM_TARGET.
 import { copyFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
 const DEFAULT_TARGET = join(
 	homedir(),
-	"Documents/Obsidian/MyVault/.obsidian/plugins/neural-vault"
+	"Documents/Obsidian/MyVault/.obsidian/plugins/vault-bloom"
 );
 
-const target = process.env.NEURAL_VAULT_TARGET
-	? join(process.cwd(), process.env.NEURAL_VAULT_TARGET)
+const target = process.env.VAULT_BLOOM_TARGET
+	? join(process.cwd(), process.env.VAULT_BLOOM_TARGET)
 	: DEFAULT_TARGET;
 
 mkdirSync(target, { recursive: true });

@@ -40,7 +40,7 @@ export class NeuralVaultSettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
-		containerEl.createEl("h2", { text: "Neural Vault" });
+		containerEl.createEl("h2", { text: "Vault Bloom" });
 
 		new Setting(containerEl)
 			.setName("Show orphan notes")

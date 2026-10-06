@@ -8,7 +8,7 @@ import { GraphNode } from "../data/types";
 import { ThreeRenderer } from "../render/three-renderer";
 import type { RendererOptions } from "../render/renderer";
 
-export const VIEW_TYPE_NEURAL_VAULT = "neural-vault-dashboard";
+export const VIEW_TYPE_VAULT_BLOOM = "vault-bloom-dashboard";
 
 const TOP_LINKED = 15;
 
@@ -27,11 +27,11 @@ export class DashboardView extends ItemView {
 	}
 
 	getViewType(): string {
-		return VIEW_TYPE_NEURAL_VAULT;
+		return VIEW_TYPE_VAULT_BLOOM;
 	}
 
 	getDisplayText(): string {
-		return "Neural Vault";
+		return "Vault Bloom";
 	}
 
 	getIcon(): string {
@@ -78,7 +78,7 @@ export class DashboardView extends ItemView {
 		this.renderer.mount(canvasWrap);
 
 		const header = contentEl.createDiv("nv-header");
-		header.createEl("h3", { text: "Neural Vault - data layer debug" });
+		header.createEl("h3", { text: "Vault Bloom - data layer debug" });
 
 		const stats = contentEl.createDiv("nv-stats");
 		for (const [key, label] of [
@@ -99,7 +99,7 @@ export class DashboardView extends ItemView {
 		refresh.addEventListener("click", () => {
 			this.plugin.rebuildGraph();
 			this.renderDebug();
-			new Notice("Neural Vault: graph rebuilt");
+			new Notice("Vault Bloom: graph rebuilt");
 		});
 		const fit = actions.createEl("button", { text: "Fit view" });
 		fit.addEventListener("click", () => this.renderer?.fitView());

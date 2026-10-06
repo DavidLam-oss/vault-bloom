@@ -1,5 +1,5 @@
 {
-  "name": "neural-vault",
+  "name": "vault-bloom",
   "version": "0.1.0",
   "description": "Render your Obsidian vault as a living neural network dashboard",
   "main": "main.js",

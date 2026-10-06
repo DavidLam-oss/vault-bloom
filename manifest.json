@@ -1,6 +1,6 @@
 {
-	"id": "neural-vault",
-	"name": "Neural Vault",
+	"id": "vault-bloom",
+	"name": "Vault Bloom",
 	"version": "0.1.0",
 	"minAppVersion": "1.0.0",
 	"description": "Render your vault as a living neural network dashboard - orb, modules and glowing connections.",
