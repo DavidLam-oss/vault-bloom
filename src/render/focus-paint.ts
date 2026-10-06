@@ -24,8 +24,8 @@ export interface LayoutView {
 	edges: Array<{ source: number; target: number }>;
 }
 
-const DIM_NODE = 0.14;
-const DIM_EDGE = 0.08;
+const DIM_NODE = 0.1;
+const DIM_EDGE = 0.06;
 
 /** All note ids of a module plus, when enabled, its adjacent ghost nodes. */
 export function focusMembers(

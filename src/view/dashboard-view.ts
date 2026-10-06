@@ -210,13 +210,21 @@ export class DashboardView extends ItemView {
 	private showHubHover(hub: HubHoverInfo | null): void {
 		if (!this.hoverBar) return;
 		if (!hub) {
-			this.hoverBar.setText("Hover a node to inspect it");
+			this.hoverBar.setText(
+				this.renderer?.getFocusedModule()
+					? "Module focus - click the hub again or press Esc to go back"
+					: "Hover a node to inspect it"
+			);
 			this.hoverBar.removeClass("nv-hoverbar-active");
 			return;
 		}
-		this.hoverBar.setText(
-			`Module: ${hub.name} · ${hub.count} notes · click to focus`
-		);
+		const focused = this.renderer?.getFocusedModule();
+		const action = focused === hub.moduleId
+			? "click again to go back"
+			: focused
+				? "click to switch module"
+				: "click to focus";
+		this.hoverBar.setText(`Module: ${hub.name} · ${hub.count} notes · ${action}`);
 		this.hoverBar.addClass("nv-hoverbar-active");
 	}
 

@@ -256,11 +256,12 @@ export class ThreeRenderer implements GraphRenderer {
 			this.noteMesh, this.ghostMesh, this.layout,
 			this.edgeLines, this.edgeBaseColors
 		);
+		this.applyHubFocusVisuals(moduleId);
 		this.positionsDirty = true;
 
 		const bounds = boundsOf(this.layout.nodes, members)
 			?? boundsOf(this.layout.nodes, null);
-		if (bounds) this.flyTo(bounds, 2.4);
+		if (bounds) this.flyTo(bounds, 1.7);
 		this.cb.onModuleFocus?.(moduleId);
 	}
 
@@ -271,6 +272,7 @@ export class ThreeRenderer implements GraphRenderer {
 		this.layout.update(this.graph, this.overviewVisible);
 		// rebuildSceneObjects restores full-strength base colors and edges.
 		this.rebuildSceneObjects(this.graph);
+		this.applyHubFocusVisuals(null);
 		this.positionsDirty = true;
 		this.flyTo(boundsOf(this.layout.nodes, null), 2.1);
 		this.cb.onModuleFocus?.(null);
@@ -278,6 +280,24 @@ export class ThreeRenderer implements GraphRenderer {
 
 	getFocusedModule(): string | null {
 		return this.focusedModule;
+	}
+
+	/**
+	 * Visual state of the hub spheres: the focused module's hub turns solid
+	 * and prominent, the others fade to near-invisible. null = overview,
+	 * every hub back at its base opacity. This is the main "something
+	 * happened" cue when clicking a hub.
+	 */
+	private applyHubFocusVisuals(moduleId: string | null): void {
+		for (const hub of this.hubMeshes) {
+			const mat = hub.mesh.material as MeshBasicMaterial;
+			mat.opacity =
+				moduleId === null
+					? 0.45
+					: hub.moduleId === moduleId
+						? 0.9
+						: 0.07;
+		}
 	}
 
 	/** Keep the current view direction, back off to frame the bounds. */
