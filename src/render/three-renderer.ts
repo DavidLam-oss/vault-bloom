@@ -1,6 +1,5 @@
-// three.js renderer: GPU-instanced glowing nodes + line-segment edges,
-// orbit camera (zoom-to-cursor), hover-highlight, click-to-fly, dblclick
-// to open, module drill-down. Shaders (orb/jellyfish) arrive in Phase 2.
+// three.js renderer: GPU-instanced glowing nodes + line-segment edges, orbit
+// camera, hover-highlight, click-to-fly + focus card, module drill-down.
 
 import {
 	BufferAttribute,
@@ -129,14 +128,12 @@ export class ThreeRenderer implements GraphRenderer {
 		this.controls = new OrbitControls(this.camera, three.domElement);
 		this.controls.enableDamping = true;
 		this.controls.dampingFactor = 0.08;
-		// Zoom toward the POINTER, not screen center: dolly toward a fixed
-		// target stops when the camera reaches it (3d-force-graph parity).
+		// Zoom toward the POINTER: dolly to a fixed target stops dead there.
 		this.controls.zoomToCursor = true;
 		this.controls.minDistance = 0.5;
 		this.controls.maxDistance = 6000;
-		// Ecosystem convention (obsidian-3d-graph / 3d-force-graph):
-		// left-drag rotates, Cmd/Ctrl+left-drag and right-drag pan.
-		// The modifier swap happens per-event in onMouseButtonMode.
+		// Ecosystem convention: left-drag rotates; Cmd/Ctrl+left and
+		// right-drag pan; the swap happens per-event in onMouseButtonMode.
 		this.controls.mouseButtons = {
 			LEFT: MOUSE.ROTATE,
 			MIDDLE: MOUSE.DOLLY,
@@ -242,13 +239,11 @@ export class ThreeRenderer implements GraphRenderer {
 		this.clearHover();
 		this.focusedModule = moduleId;
 
-		// Lazy-expand: overview set + every member note (orphans included)
-		// + the ghosts hanging off members. Existing nodes stay pinned via
-		// the position cache; only the freshly expanded ones simulate in.
+		// Lazy-expand: overview set + every member (orphans included) + the
+		// ghosts hanging off members. Existing nodes stay pinned via cache.
 		const members = focusMembers(this.graph, this.options, moduleId);
 		this.layout.update(this.graph, expandedVisible(this.overviewVisible, members));
-		// Deliberately no pruneCache: leaving focus keeps expanded positions
-		// warm so re-entering the same module doesn't reshuffle it.
+		// No pruneCache: expanded positions stay warm across focus visits.
 		this.rebuildSceneObjects(this.graph);
 		paintFocusDim(
 			members, this.slots, this.noteBase, this.ghostBase,
@@ -275,6 +270,7 @@ export class ThreeRenderer implements GraphRenderer {
 		this.applyHubFocusVisuals(null);
 		this.positionsDirty = true;
 		this.flyTo(boundsOf(this.layout.nodes, null), 2.1);
+		this.cb.onNodeFocused?.(null);
 		this.cb.onModuleFocus?.(null);
 	}
 
@@ -552,9 +548,8 @@ export class ThreeRenderer implements GraphRenderer {
 		const el = this.three?.domElement;
 		if (!el) return;
 		// The modifier swap MUST run before OrbitControls' own pointerdown
-		// reads mouseButtons. Note that capture listeners on the TARGET
-		// element fire in registration order (i.e. after OrbitControls',
-		// which registered first), so we bind to the host ANCESTOR where
+		// reads mouseButtons; capture on the TARGET fires in registration
+		// order (after OrbitControls'), so bind to the host ANCESTOR where
 		// the capture phase genuinely precedes the target.
 		const swapHost = this.host ?? el;
 		swapHost.addEventListener("pointerdown", this.onMouseButtonMode, true);
@@ -565,9 +560,9 @@ export class ThreeRenderer implements GraphRenderer {
 		el.addEventListener("pointerup", this.onPointerUp);
 		el.addEventListener("pointerleave", this.onPointerLeave);
 		el.addEventListener("dblclick", this.onDoubleClick);
-		// Esc leaves module focus. Key events target the focused element
-		// (usually body), so the host can never be an ancestor — the only
-		// working spot is window capture, gated on "pointer over canvas".
+		// Esc leaves module focus. Key events land on the focused element
+		// (usually body), so window-capture + pointer-over-canvas is the
+		// only working spot.
 		window.addEventListener("keydown", this.onKeyDown, true);
 	}
 
@@ -609,10 +604,11 @@ export class ThreeRenderer implements GraphRenderer {
 			// Click a hub to focus; click it again to leave; another hub swaps.
 			if (this.focusedModule === this.hubHover.moduleId) this.clearFocus();
 			else this.focusModule(this.hubHover.moduleId);
+			this.cb.onNodeFocused?.(null);
 			return;
 		}
 		// Single click = fly to the node (galaxy-view model); double-click opens.
-		if (this.hover) this.flyToNode(this.hover);
+		this.flyToNode(this.hover);
 	};
 
 	private onWheelCapture = (): void => {
@@ -624,14 +620,17 @@ export class ThreeRenderer implements GraphRenderer {
 		if (node && (!hub || node.dist <= hub.dist)) this.cb.onNodeOpen?.(node.slot.node);
 	};
 
-	/** Fly to frame one node; the arrival orbit sweeps toward its neighbors. */
-	private flyToNode(slot: Slot): void {
+	/** Fly to frame one node; the arrival orbit sweeps toward its neighbors.
+	 *  null = empty-canvas click: clears the selection (focus card). */
+	private flyToNode(slot: Slot | null): void {
+		if (!slot) { this.cb.onNodeFocused?.(null); return; }
 		if (!this.fly) return;
 		const sim = this.layout.nodes[this.slots.indexOf(slot)];
 		if (!sim) return;
 		const pos = new Vector3(sim.x, sim.y, sim.z);
 		const r = slot.mesh === "ghost" ? 0.9 : nodeScale(slot.node.degree);
 		this.fly.flyToNode(pos, r, this.densityBias(slot.node.id, pos));
+		this.cb.onNodeFocused?.(slot.node);
 	}
 
 	/** Mean direction from the node to its rendered neighbors. */

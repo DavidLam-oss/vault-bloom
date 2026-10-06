@@ -133,3 +133,110 @@
 	margin: 8px 0 16px;
 	padding-left: 20px;
 }
+
+/* --- focus card (selected note info) --------------------------------- */
+.nv-fcard {
+	position: absolute;
+	top: 14px;
+	right: 14px;
+	width: 250px;
+	max-height: calc(100% - 28px);
+	overflow-y: auto;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 10px;
+	box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+	backdrop-filter: blur(6px);
+	font-size: 12px;
+	z-index: 10;
+	opacity: 0;
+	transform: translateY(-6px);
+	pointer-events: none;
+	transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.nv-fcard-visible {
+	opacity: 1;
+	transform: translateY(0);
+	pointer-events: auto;
+}
+
+.nv-fcard-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px;
+	padding: 8px 10px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	cursor: grab;
+	user-select: none;
+}
+
+.nv-fcard-head:active {
+	cursor: grabbing;
+}
+
+.nv-fcard-title {
+	font-weight: 600;
+	font-size: 12.5px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.nv-fcard-close {
+	cursor: pointer;
+	opacity: 0.6;
+	padding: 0 2px;
+}
+
+.nv-fcard-close:hover {
+	opacity: 1;
+}
+
+.nv-fcard-body {
+	padding: 8px 10px 10px;
+}
+
+.nv-fcard-meta {
+	color: var(--text-muted);
+	margin-bottom: 6px;
+}
+
+.nv-fcard-tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin-bottom: 6px;
+}
+
+.nv-fcard-tags span {
+	background: var(--background-modifier-hover);
+	border-radius: 4px;
+	padding: 1px 6px;
+	color: var(--text-accent);
+}
+
+.nv-fcard-snippet {
+	color: var(--text-normal);
+	line-height: 1.45;
+	margin-bottom: 8px;
+	white-space: normal;
+}
+
+.nv-fcard-section {
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	font-size: 10px;
+	margin-bottom: 4px;
+}
+
+.nv-fcard-backlinks ul {
+	margin: 0 0 8px;
+	padding-left: 16px;
+}
+
+.nv-fcard-open {
+	width: 100%;
+}

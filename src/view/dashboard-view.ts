@@ -6,6 +6,7 @@ import { ItemView, Notice, WorkspaceLeaf } from "obsidian";
 import type NeuralVaultPlugin from "../main";
 import { GraphNode } from "../data/types";
 import { ThreeRenderer } from "../render/three-renderer";
+import { FocusCard } from "./focus-card";
 import type { HubHoverInfo, RendererOptions } from "../render/renderer";
 
 export const VIEW_TYPE_VAULT_BLOOM = "vault-bloom-dashboard";
@@ -21,6 +22,7 @@ export class DashboardView extends ItemView {
 	private topListEl: HTMLElement | null = null;
 	private hoverBar: HTMLElement | null = null;
 	private backBtn: HTMLElement | null = null;
+	private focusCard: FocusCard | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: NeuralVaultPlugin) {
 		super(leaf);
@@ -44,6 +46,8 @@ export class DashboardView extends ItemView {
 	}
 
 	async onClose(): Promise<void> {
+		this.focusCard?.dispose();
+		this.focusCard = null;
 		this.renderer?.dispose();
 		this.renderer = null;
 		this.contentEl.empty();
@@ -81,8 +85,10 @@ export class DashboardView extends ItemView {
 			onNodeHover: (node) => this.showHover(node),
 			onModuleFocus: (moduleId) => this.onFocusChange(moduleId),
 			onHubHover: (hub) => this.showHubHover(hub),
+			onNodeFocused: (node) => this.showFocusCard(node),
 		});
 		this.renderer.mount(canvasWrap);
+		this.focusCard = new FocusCard(this.app, canvasWrap);
 
 		const header = contentEl.createDiv("nv-header");
 		header.createEl("h3", { text: "Vault Bloom - data layer debug" });
@@ -184,6 +190,14 @@ export class DashboardView extends ItemView {
 			return;
 		}
 		new Notice(`"${node.title}" is not created yet - a gap in your knowledge.`);
+	}
+
+	private showFocusCard(node: GraphNode | null): void {
+		if (!node) {
+			this.focusCard?.hide();
+			return;
+		}
+		this.focusCard?.show(node);
 	}
 
 	private showHover(node: GraphNode | null): void {

@@ -31,6 +31,8 @@ export interface RendererCallbacks {
 	onModuleFocus?: (moduleId: string | null) => void;
 	/** pointer entered/left a module hub (null = left) */
 	onHubHover?: (hub: HubHoverInfo | null) => void;
+	/** camera flew to a node (selected); null = selection cleared */
+	onNodeFocused?: (node: GraphNode | null) => void;
 }
 
 export interface GraphRenderer {
