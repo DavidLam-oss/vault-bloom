@@ -63,6 +63,19 @@ export class CameraFly {
 		if (this.flight) this.finish();
 	}
 
+	/**
+	 * Fly to frame a single node (galaxy-view FLY_TO formula): keep the
+	 * current view direction, park the camera at radius*12 (clamped 40-140)
+	 * from the node so it fills a comfortable part of the viewport.
+	 */
+	flyToNode(nodePos: Vector3, nodeRadius: number, durationMs = 700): void {
+		const dist = Math.min(140, Math.max(40, nodeRadius * 12));
+		const dir = this.camera.position.clone().sub(this.controls.target);
+		if (dir.lengthSq() < 1e-6) dir.set(0.62, 0.46, 0.62);
+		dir.normalize();
+		this.flyTo(nodePos, nodePos.clone().add(dir.multiplyScalar(dist)), durationMs);
+	}
+
 	private finish(): void {
 		this.flight = null;
 		this.controls.enabled = true;

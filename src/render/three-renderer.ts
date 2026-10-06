@@ -1,9 +1,6 @@
 // three.js renderer: GPU-instanced glowing nodes + line-segment edges,
-// orbit camera, hover-highlight of neighbours, click-to-open.
-//
-// Phase 1 keeps visuals deliberately simple (instanced spheres + fog). The
-// orb / jellyfish / tendril shaders arrive in Phase 2 behind the same
-// GraphRenderer interface.
+// orbit camera (zoom-to-cursor), hover-highlight, click-to-fly, dblclick
+// to open, module drill-down. Shaders (orb/jellyfish) arrive in Phase 2.
 
 import {
 	BufferAttribute,
@@ -32,6 +29,8 @@ import { CameraFly } from "./camera-tween";
 import { boundsOf, expandedVisible, focusMembers, paintFocusDim } from "./focus-paint";
 import { FlowLayer, buildFlowSegments } from "./flow-particles";
 import { ForceLayout } from "./layout";
+import { nodeScale } from "./slot";
+import type { Slot } from "./slot";
 import type {
 	GraphRenderer,
 	HubHoverInfo,
@@ -47,17 +46,6 @@ const NEIGHBOR_COLOR = new Color(0xd8e6ff);
 const GHOST_COLOR = new Color(0x8f83e0);
 const LINK_FLOW_COLOR = new Color(0x9db4e6);
 const GHOST_FLOW_COLOR = new Color(0x8677c2);
-
-/** instance scale = base + sqrt(degree) * k, clamped */
-function nodeScale(degree: number): number {
-	return Math.min(9, 0.9 + Math.sqrt(degree) * 1.1);
-}
-
-interface Slot {
-	mesh: "note" | "ghost";
-	local: number;
-	node: GraphNode;
-}
 
 export class ThreeRenderer implements GraphRenderer {
 	private cb: RendererCallbacks;
@@ -142,10 +130,9 @@ export class ThreeRenderer implements GraphRenderer {
 		this.controls.enableDamping = true;
 		this.controls.dampingFactor = 0.08;
 		// Zoom toward the POINTER, not screen center: dolly toward a fixed
-		// target stops when the camera reaches it, so off-center notes
-		// could never be zoomed into (3d-force-graph parity).
+		// target stops when the camera reaches it (3d-force-graph parity).
 		this.controls.zoomToCursor = true;
-		this.controls.minDistance = 2;
+		this.controls.minDistance = 0.5;
 		this.controls.maxDistance = 6000;
 		// Ecosystem convention (obsidian-3d-graph / 3d-force-graph):
 		// left-drag rotates, Cmd/Ctrl+left-drag and right-drag pan.
@@ -575,6 +562,7 @@ export class ThreeRenderer implements GraphRenderer {
 		el.addEventListener("pointerdown", this.onPointerDown);
 		el.addEventListener("pointerup", this.onPointerUp);
 		el.addEventListener("pointerleave", this.onPointerLeave);
+		el.addEventListener("dblclick", this.onDoubleClick);
 		// Esc leaves module focus. Key events target the focused element
 		// (usually body), so the host can never be an ancestor — the only
 		// working spot is window capture, gated on "pointer over canvas".
@@ -621,67 +609,78 @@ export class ThreeRenderer implements GraphRenderer {
 			else this.focusModule(this.hubHover.moduleId);
 			return;
 		}
-		if (this.hover) this.cb.onNodeClick?.(this.hover.node);
+		// Single click = fly to the node (galaxy-view model); double-click opens.
+		if (this.hover) this.flyToNode(this.hover);
 	};
+
+	private onDoubleClick = (e: MouseEvent): void => {
+		const { node, hub } = this.pickAt(e);
+		if (node && (!hub || node.dist <= hub.dist)) this.cb.onNodeOpen?.(node.slot.node);
+	};
+
+	/** Fly the camera over to frame one node (see CameraFly.flyToNode). */
+	private flyToNode(slot: Slot): void {
+		if (!this.fly) return;
+		const sim = this.layout.nodes[this.slots.indexOf(slot)];
+		if (!sim) return;
+		const r = slot.mesh === "ghost" ? 0.9 : nodeScale(slot.node.degree);
+		this.fly.flyToNode(new Vector3(sim.x, sim.y, sim.z), r);
+	}
 
 	private onPointerLeave = (): void => {
 		this.pointerDownAt = null;
 		this.clearHover();
 	};
 
-	private onPointerMove = (e: PointerEvent): void => {
-		this.lastPointer.x = e.clientX;
-		this.lastPointer.y = e.clientY;
+	/** Raycast notes/ghosts/hubs under a client position. */
+	private pickAt(at: { clientX: number; clientY: number }): {
+		node: { slot: Slot; dist: number } | null;
+		hub: { moduleId: string; count: number; dist: number } | null;
+	} {
 		const el = this.three?.domElement;
-		if (!el || !this.camera) return;
+		if (!el || !this.camera) return { node: null, hub: null };
 		const rect = el.getBoundingClientRect();
 		this.raycaster.setFromCamera(
 			new Vector2(
-				((e.clientX - rect.left) / rect.width) * 2 - 1,
-				-((e.clientY - rect.top) / rect.height) * 2 + 1
+				((at.clientX - rect.left) / rect.width) * 2 - 1,
+				-((at.clientY - rect.top) / rect.height) * 2 + 1
 			),
 			this.camera
 		);
-
-		// Nearest hit across notes, ghosts and module hubs.
-		let bestNode: { slot: Slot; dist: number } | null = null;
-		// O(1) instanceId -> slot lookup via the per-mesh reverse index.
-		for (const [mesh, kind] of [
-			[this.noteMesh, "note"],
-			[this.ghostMesh, "ghost"],
-		] as const) {
+		let node: { slot: Slot; dist: number } | null = null;
+		for (const [mesh, kind] of [[this.noteMesh, "note"], [this.ghostMesh, "ghost"]] as const) {
 			if (!mesh) continue;
 			for (const hit of this.raycaster.intersectObject(mesh)) {
-				if (hit.instanceId === undefined) continue;
-				const slot = this.slotByLocal(kind, hit.instanceId);
-				if (!slot) continue;
-				if (!bestNode || hit.distance < bestNode.dist) {
-					bestNode = { slot, dist: hit.distance };
+				const slot = hit.instanceId === undefined ? null : this.slotByLocal(kind, hit.instanceId);
+				if (slot && (!node || hit.distance < node.dist)) node = { slot, dist: hit.distance };
+			}
+		}
+		let hub: { moduleId: string; count: number; dist: number } | null = null;
+		for (const h of this.hubMeshes) {
+			for (const hit of this.raycaster.intersectObject(h.mesh)) {
+				if (!hub || hit.distance < hub.dist) {
+					hub = { moduleId: h.moduleId, count: h.count, dist: hit.distance };
 				}
 			}
 		}
-		let bestHub: { moduleId: string; count: number; dist: number } | null = null;
-		for (const hub of this.hubMeshes) {
-			for (const hit of this.raycaster.intersectObject(hub.mesh)) {
-				if (!bestHub || hit.distance < bestHub.dist) {
-					bestHub = { moduleId: hub.moduleId, count: hub.count, dist: hit.distance };
-				}
-			}
-		}
+		return { node, hub };
+	}
 
-		if (bestHub && (!bestNode || bestHub.dist < bestNode.dist)) {
+	private onPointerMove = (e: PointerEvent): void => {
+		this.lastPointer.x = e.clientX;
+		this.lastPointer.y = e.clientY;
+		const { node, hub } = this.pickAt(e);
+		if (hub && (!node || hub.dist < node.dist)) {
 			this.clearHover();
-			this.applyHubHover(bestHub);
+			this.applyHubHover(hub);
 			return;
 		}
-		if (bestNode?.slot.node.id === this.hover?.node.id) return;
+		if (node?.slot.node.id === this.hover?.node.id) return;
 		this.clearHover();
-		if (bestNode) this.applyHover(bestNode.slot);
+		if (node) this.applyHover(node.slot);
 	};
 
 	private slotByLocal(kind: "note" | "ghost", local: number): Slot | null {
-		// Reverse index: scan-free lookup via slotById is by id, not local
-		// index, so keep a small per-kind array alongside.
 		const list = kind === "note" ? this.noteSlots : this.ghostSlots;
 		return list[local] ?? null;
 	}

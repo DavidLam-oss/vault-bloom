@@ -70,14 +70,14 @@ export class DashboardView extends ItemView {
 		// Canvas first: the dashboard is a renderer with stats underneath.
 		const canvasWrap = contentEl.createDiv("nv-canvas-wrap");
 		this.hoverBar = canvasWrap.createDiv("nv-hoverbar");
-		this.hoverBar.setText("Left-drag rotate · Cmd+drag or right-drag pan · Scroll zoom · Click a glowing hub to focus its module");
+		this.hoverBar.setText("Left-drag rotate · Cmd/right-drag pan · Scroll zoom to cursor · Click note to fly · Double-click to open");
 
 		this.backBtn = canvasWrap.createDiv("nv-backbtn");
 		this.backBtn.setText("← Back to overview (Esc)");
 		this.backBtn.addEventListener("click", () => this.renderer?.clearFocus());
 
 		this.renderer = new ThreeRenderer({
-			onNodeClick: (node) => this.openNode(node),
+			onNodeOpen: (node) => this.openNode(node),
 			onNodeHover: (node) => this.showHover(node),
 			onModuleFocus: (moduleId) => this.onFocusChange(moduleId),
 			onHubHover: (hub) => this.showHubHover(hub),

@@ -21,8 +21,10 @@ export interface HubHoverInfo {
 }
 
 export interface RendererCallbacks {
-	/** user clicked a node (note => open in editor, ghost => notice) */
-	onNodeClick?: (node: GraphNode) => void;
+	/** user double-clicked a node (note => open in editor, ghost => notice).
+	 *  Single click flies the camera to the node (renderer-internal, the
+	 *  galaxy-view / Obsidian-core-graph interaction model). */
+	onNodeOpen?: (node: GraphNode) => void;
 	/** hover enter/leave; null means the pointer left every node */
 	onNodeHover?: (node: GraphNode | null) => void;
 	/** module focus entered (moduleId) or returned to overview (null) */
