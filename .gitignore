@@ -1,0 +1,8 @@
+node_modules/
+main.js
+data.json
+*.map
+.DS_Store
+scripts/.layout-smoke.cjs
+docs/
+.workbuddy/

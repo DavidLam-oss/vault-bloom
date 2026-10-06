@@ -1,0 +1,35 @@
+{
+  "name": "neural-vault",
+  "version": "0.1.0",
+  "description": "Render your Obsidian vault as a living neural network dashboard",
+  "main": "main.js",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"deploy": "node scripts/deploy.mjs",
+		"start": "npm run build && npm run deploy",
+		"smoke": "esbuild scripts/layout-smoke.ts --bundle --platform=node --format=cjs --outfile=scripts/.layout-smoke.cjs --external:obsidian && node scripts/.layout-smoke.cjs"
+	},
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "knowledge-graph",
+    "threejs"
+  ],
+  "author": "DavidLin",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/d3-force": "^3.0.10",
+    "@types/node": "^22.7.0",
+    "@types/three": "^0.186.0",
+    "builtin-modules": "3.3.0",
+    "esbuild": "^0.24.0",
+    "obsidian": "latest",
+    "tslib": "^2.7.0",
+    "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "d3-force-3d": "^3.0.6",
+    "three": "^0.186.1"
+  }
+}

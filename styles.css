@@ -1,0 +1,102 @@
+/* Neural Vault - minimal styles for the debug view (Phase 1) */
+
+.nv-stats {
+	display: flex;
+	gap: 16px;
+	flex-wrap: wrap;
+	margin: 12px 0;
+}
+
+.nv-stat {
+	padding: 8px 14px;
+	border-radius: 8px;
+	background-color: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+}
+
+.nv-stat .nv-stat-value {
+	font-size: 1.4em;
+	font-weight: 600;
+}
+
+.nv-stat .nv-stat-label {
+	color: var(--text-muted);
+	font-size: 0.85em;
+}
+
+.nv-module-table {
+	width: 100%;
+	border-collapse: collapse;
+	margin: 8px 0 16px;
+}
+
+.nv-module-table th,
+.nv-module-table td {
+	text-align: left;
+	padding: 6px 10px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.nv-module-dot {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	margin-right: 8px;
+	vertical-align: middle;
+}
+
+/* --- neural canvas ----------------------------------------------------- */
+
+.nv-canvas-wrap {
+	position: relative;
+	height: 56vh;
+	min-height: 340px;
+	border-radius: 12px;
+	overflow: hidden;
+	border: 1px solid var(--background-modifier-border);
+	margin-bottom: 12px;
+}
+
+.nv-canvas-host {
+	position: absolute;
+	inset: 0;
+}
+
+.nv-canvas-host canvas {
+	display: block;
+}
+
+.nv-hoverbar {
+	position: absolute;
+	left: 10px;
+	bottom: 10px;
+	z-index: 2;
+	padding: 6px 12px;
+	border-radius: 8px;
+	background-color: rgba(11, 15, 23, 0.78);
+	color: #c8d3e8;
+	font-size: 0.85em;
+	pointer-events: none;
+	max-width: calc(100% - 20px);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.nv-hoverbar-active {
+	color: #ffffff;
+}
+
+.nv-actions {
+	display: flex;
+	gap: 8px;
+	margin: 8px 0;
+}
+
+.nv-top-list {
+	columns: 2;
+	column-gap: 24px;
+	margin: 8px 0 16px;
+	padding-left: 20px;
+}
