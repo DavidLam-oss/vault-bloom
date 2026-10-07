@@ -50,6 +50,13 @@ export class CameraFly {
 		return this.flight !== null || this.orbit !== null;
 	}
 
+	/** True while the camera is actually moving (flight, or a rotating
+	 *  orbit) - a held orbit is static, nothing needs re-picking. */
+	get moving(): boolean {
+		return this.flight !== null ||
+			(this.orbit !== null && !this.holdProbe());
+	}
+
 	flyTo(target: Vector3, position: Vector3, durationMs = 650): void {
 		this.orbit = null;
 		this.pendingOrbit = null;

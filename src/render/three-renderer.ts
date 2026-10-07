@@ -77,6 +77,9 @@ export class ThreeRenderer implements GraphRenderer {
 	private hover: Slot | null = null;
 	private hoverNeighbors: Slot[] = [];
 	private hoverAnnounced = false;
+	/** hover came from real pointer motion (vs a node drifting under a
+	 *  static cursor during camera rotation) - only the former holds. */
+	private hoverFromPointer = false;
 	private hubHover: { moduleId: string; count: number } | null = null;
 	private hubAnnounced = false;
 	private pointerDownAt: Vector2 | null = null;
@@ -131,16 +134,16 @@ export class ThreeRenderer implements GraphRenderer {
 		this.controls.zoomToCursor = true;
 		this.controls.minDistance = 0.5;
 		this.controls.maxDistance = 6000;
-		// Ecosystem convention: left-drag rotates; Cmd/Ctrl+left or right-drag pans.
 		this.controls.mouseButtons = {
 			LEFT: MOUSE.ROTATE,
 			MIDDLE: MOUSE.DOLLY,
 			RIGHT: MOUSE.PAN,
 		};
-		// Hold the orbit while aiming: pointer over a node, or over the
-		// focus card (overlays the canvas, so canvas :hover goes false).
+		// Orbit-hold authority: only POINTER-established hover (or hovering
+		// the focus card, where canvas :hover drops) may pause the rotation.
 		this.fly = new CameraFly(this.camera, this.controls, () =>
-			this.hover !== null || (this.host?.matches(":hover") === true &&
+			(this.hover !== null && this.hoverFromPointer) ||
+			(this.host?.matches(":hover") === true &&
 				this.three?.domElement?.matches(":hover") !== true));
 
 		this.bindPointerEvents();
@@ -363,7 +366,6 @@ export class ThreeRenderer implements GraphRenderer {
 			else noteNodes.push(node);
 		}
 
-		// Note mesh: module color, size by degree, orphans dimmed.
 		if (noteNodes.length > 0) {
 			const geometry = new SphereGeometry(1, 10, 8);
 			const material = new MeshBasicMaterial({ toneMapped: false });
@@ -382,7 +384,6 @@ export class ThreeRenderer implements GraphRenderer {
 			this.noteMesh = mesh;
 		}
 
-		// Ghost mesh: small, translucent, knowledge gaps.
 		if (ghostNodes.length > 0) {
 			const geometry = new SphereGeometry(1, 8, 6);
 			const material = new MeshBasicMaterial({
@@ -402,7 +403,6 @@ export class ThreeRenderer implements GraphRenderer {
 			this.ghostMesh = mesh;
 		}
 
-		// Module hubs: clickable cluster anchors (Phase 2 swaps in jellyfish).
 		this.hubMeshes = [];
 		const noteCountByModule = new Map<string, number>();
 		for (const n of graph.nodes) {
@@ -460,7 +460,6 @@ export class ThreeRenderer implements GraphRenderer {
 			this.scene.add(this.edgeLines);
 		}
 
-		// Flow layer: particles on every edge + one tendril per hub member.
 		if (this.flow) {
 			this.flow.rebuild(
 				buildFlowSegments(
@@ -556,9 +555,8 @@ export class ThreeRenderer implements GraphRenderer {
 		el.addEventListener("pointerup", this.onPointerUp);
 		el.addEventListener("pointerleave", this.onPointerLeave);
 		el.addEventListener("dblclick", this.onDoubleClick);
-		// Esc leaves module focus. Key events land on the focused element
-		// (usually body), so window-capture + pointer-over-canvas is the
-		// only working spot.
+		// Esc leaves module focus; key events land on body, so this needs
+		// window-capture + a pointer-over-canvas gate.
 		window.addEventListener("keydown", this.onKeyDown, true);
 	}
 
@@ -597,7 +595,6 @@ export class ThreeRenderer implements GraphRenderer {
 		if (!down) return;
 		if (down.distanceTo(new Vector2(e.clientX, e.clientY)) > 6) return;
 		if (this.hubHover) {
-			// Click a hub to focus; click it again to leave; another hub swaps.
 			if (this.focusedModule === this.hubHover.moduleId) this.clearFocus();
 			else this.focusModule(this.hubHover.moduleId);
 			this.cb.onNodeFocused?.(null);
@@ -683,13 +680,16 @@ export class ThreeRenderer implements GraphRenderer {
 	private onPointerMove = (e: PointerEvent): void => {
 		this.lastPointer.x = e.clientX;
 		this.lastPointer.y = e.clientY;
-		this.pickAndHover();
+		this.pickAndHover(true);
 	};
 
-	/** Hover = whatever is under the pointer right now. Also re-run per
-	 *  frame while the camera moves: the scene shifts under a static cursor. */
-	private pickAndHover(): void {
+	/** Hover = whatever is under the pointer, re-picked per frame on camera motion. */
+	private pickAndHover(fromPointer: boolean): void {
 		const { node, hub } = this.pickAt(this.lastPointer);
+		if (fromPointer) this.hoverFromPointer = node !== null;
+		else if (node?.slot.node.id !== this.hover?.node.id) {
+			this.hoverFromPointer = false;
+		}
 		if (hub && (!node || hub.dist < node.dist)) {
 			this.clearHover();
 			this.applyHubHover(hub);
@@ -783,7 +783,7 @@ export class ThreeRenderer implements GraphRenderer {
 			this.flow?.applyCameraDistance(this.camera, this.controls, this.layout.estimateRadius());
 			if (this.fly?.busy) {
 				this.fly.tick(dt);
-				this.pickAndHover(); // camera moved under a static cursor
+				if (this.fly.moving) this.pickAndHover(false);
 			} else this.controls?.update();
 			this.three.render(this.scene!, this.camera!);
 		};
