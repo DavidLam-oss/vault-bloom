@@ -28,6 +28,8 @@ export class CameraFly {
 	private flight: FlightState | null = null;
 	private orbit: OrbitState | null = null;
 	private pendingOrbit: { center: Vector3; bias: Vector3 | null } | null = null;
+	/** prefers-reduced-motion: snap instead of flying, never auto-orbit */
+	private reducedMotion = false;
 
 	/**
 	 * `holdProbe` returns true while the post-arrival orbit should freeze
@@ -39,6 +41,17 @@ export class CameraFly {
 		private controls: OrbitControls,
 		private holdProbe: () => boolean = () => false
 	) {}
+
+	setReducedMotion(reduced: boolean): void {
+		this.reducedMotion = reduced;
+		if (reduced) {
+			this.pendingOrbit = null;
+			if (this.orbit) {
+				this.orbit = null;
+				this.controls.enabled = true;
+			}
+		}
+	}
 
 	/** True while a flight is running (the render loop must skip controls.update). */
 	get active(): boolean {
@@ -66,7 +79,7 @@ export class CameraFly {
 			fromTgt: this.controls.target.clone(),
 			toTgt: target.clone(),
 			started: performance.now(),
-			durationMs: Math.max(1, durationMs),
+			durationMs: Math.max(1, this.reducedMotion ? 1 : durationMs),
 		};
 		// Damping would fight the per-frame lerp, so park the controls.
 		this.controls.enabled = false;
@@ -77,6 +90,7 @@ export class CameraFly {
 	 * current view direction, park the camera at radius*12 (clamped 40-140)
 	 * from the node. `bias` (a direction from the node toward its neighbor
 	 * cluster) makes the post-arrival orbit sweep across the dense side.
+	 * Under prefers-reduced-motion there is no arrival orbit at all.
 	 */
 	flyToNode(nodePos: Vector3, nodeRadius: number, bias: Vector3 | null = null, durationMs = 700): void {
 		const dist = Math.min(140, Math.max(40, nodeRadius * 12));
@@ -84,7 +98,7 @@ export class CameraFly {
 		if (dir.lengthSq() < 1e-6) dir.set(0.62, 0.46, 0.62);
 		dir.normalize();
 		this.flyTo(nodePos, nodePos.clone().add(dir.multiplyScalar(dist)), durationMs);
-		this.pendingOrbit = { center: nodePos.clone(), bias };
+		if (!this.reducedMotion) this.pendingOrbit = { center: nodePos.clone(), bias };
 	}
 
 	/**
@@ -132,6 +146,10 @@ export class CameraFly {
 	}
 
 	private beginOrbit(center: Vector3, bias: Vector3 | null): void {
+		if (this.reducedMotion) {
+			this.controls.enabled = true;
+			return;
+		}
 		const offset = this.camera.position.clone().sub(center);
 		if (offset.lengthSq() < 1e-6) {
 			this.controls.enabled = true;

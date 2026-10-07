@@ -6,7 +6,6 @@
 // keeps the math simple until the jellyfish shader work lands.
 
 import {
-	AdditiveBlending,
 	BufferAttribute,
 	BufferGeometry,
 	CanvasTexture,
@@ -18,6 +17,7 @@ import {
 	PointsMaterial,
 	Scene,
 } from "three";
+import type { Palette } from "./palette";
 
 export interface FlowSegment {
 	/** layout node index for end A, or -1 when A is a fixed point (hub) */
@@ -53,7 +53,6 @@ const PARTICLES_PER: Record<FlowSegment["kind"], number> = {
 	ghost: 1,
 	tendril: 1,
 };
-const MIN_BRIGHT = 0.18;
 const FOCUS_DIM_PARTICLE = 0.12;
 const FOCUS_DIM_TENDRIL = 0.1;
 
@@ -98,6 +97,7 @@ export function buildFlowSegments(
 
 export class FlowLayer {
 	private scene: Scene;
+	private palette: Palette;
 	private points: Points | null = null;
 	private pointMat: PointsMaterial | null = null;
 	private tendrils: LineSegments | null = null;
@@ -107,13 +107,37 @@ export class FlowLayer {
 	private segs: Seg[] = [];
 	private travel = new Float64Array(0);
 	private accel = new Float32Array(0);
-	private dim = new Float32Array(0);
+	/**
+	 * Per-segment particle colour after focus dimming. Dimming mixes towards
+	 * the canvas background rather than scaling the colour, so a faded
+	 * particle really does recede into the picture.
+	 */
+	private dimR = new Float32Array(0);
+	private dimG = new Float32Array(0);
+	private dimB = new Float32Array(0);
 	private posArr = new Float32Array(0);
 	private colArr = new Float32Array(0);
 	private linePosArr = new Float32Array(0);
+	private lineColArr = new Float32Array(0);
+	/** frozen phase for prefers-reduced-motion: particles hold still */
+	private motionEnabled = true;
 
-	constructor(scene: Scene) {
+	constructor(scene: Scene, palette: Palette) {
 		this.scene = scene;
+		this.palette = palette;
+	}
+
+	/** prefers-reduced-motion: keep the particles, stop them travelling. */
+	setMotionEnabled(enabled: boolean): void {
+		this.motionEnabled = enabled;
+	}
+
+	/**
+	 * Read-only view of the particle position buffer. Exposed so the headless
+	 * smoke test can prove that a frozen layer really does hold still.
+	 */
+	get positionBuffer(): Float32Array {
+		return this.posArr;
 	}
 
 	rebuild(
@@ -152,7 +176,14 @@ export class FlowLayer {
 
 		this.travel = new Float64Array(this.segs.length);
 		this.accel = new Float32Array(this.segs.length).fill(1);
-		this.dim = new Float32Array(this.segs.length).fill(1);
+		this.dimR = new Float32Array(this.segs.length);
+		this.dimG = new Float32Array(this.segs.length);
+		this.dimB = new Float32Array(this.segs.length);
+		this.segs.forEach((s, i) => {
+			this.dimR[i] = s.color.r;
+			this.dimG[i] = s.color.g;
+			this.dimB[i] = s.color.b;
+		});
 		this.posArr = new Float32Array(total * 3);
 		this.colArr = new Float32Array(total * 3);
 
@@ -165,14 +196,14 @@ export class FlowLayer {
 			"color",
 			new BufferAttribute(this.colArr, 3).setUsage(DynamicDrawUsage)
 		);
-		this.sprite = this.sprite ?? this.makeSprite();
+		if (!this.sprite) this.sprite = this.makeSprite();
 		this.pointMat = new PointsMaterial({
 			size: 3.2,
 			sizeAttenuation: false,
 			map: this.sprite,
 			transparent: true,
 			depthWrite: false,
-			blending: AdditiveBlending,
+			blending: this.palette.flowBlending,
 			vertexColors: true,
 		});
 		this.points = new Points(geo, this.pointMat);
@@ -181,12 +212,12 @@ export class FlowLayer {
 
 		if (tendrilCount > 0) {
 			this.linePosArr = new Float32Array(tendrilCount * 6);
-			const lineColArr = new Float32Array(tendrilCount * 6);
+			this.lineColArr = new Float32Array(tendrilCount * 6);
 			for (const s of this.segs) {
 				if (s.kind !== "tendril") continue;
 				const c = s.color.clone().multiplyScalar(0.5);
 				for (const v of [0, 1]) {
-					lineColArr.set([c.r, c.g, c.b], (s.lineSlot * 2 + v) * 3);
+					this.lineColArr.set([c.r, c.g, c.b], (s.lineSlot * 2 + v) * 3);
 				}
 			}
 			const lineGeo = new BufferGeometry();
@@ -194,11 +225,14 @@ export class FlowLayer {
 				"position",
 				new BufferAttribute(this.linePosArr, 3).setUsage(DynamicDrawUsage)
 			);
-			lineGeo.setAttribute("color", new BufferAttribute(lineColArr, 3));
+			lineGeo.setAttribute(
+				"color",
+				new BufferAttribute(this.lineColArr, 3).setUsage(DynamicDrawUsage)
+			);
 			this.tendrilMat = new LineBasicMaterial({
 				vertexColors: true,
 				transparent: true,
-				opacity: 0.15,
+				opacity: this.tendrilOpacity(),
 				depthWrite: false,
 			});
 			this.tendrils = new LineSegments(lineGeo, this.tendrilMat);
@@ -235,26 +269,63 @@ export class FlowLayer {
 			camera.position.z - controls.target.z
 		);
 		const radius = Math.max(60, graphRadius);
-		// Overview distance (~2x radius) -> 0.22; near (<= ~0.2 radius) -> 1.
-		const f = Math.min(1, Math.max(0.22, 1.55 - dist / (radius * 1.4)));
+		// Overview distance (~2x radius) -> flowMinOpacity; near (<= ~0.2
+		// radius) -> 1. Additive blending saturates to white where particles
+		// pile up, so the overview needs a much lower opacity floor.
+		const floor = this.palette.flowMinOpacity;
+		const f = Math.min(1, Math.max(floor, 1.55 - dist / (radius * 1.4)));
 		if (this.pointMat) this.pointMat.opacity = f;
-		if (this.tendrilMat) this.tendrilMat.opacity = 0.15 * f;
+		if (this.tendrilMat) this.tendrilMat.opacity = this.tendrilOpacity() * f;
 	}
 
-	/** Module focus: dim particles whose segment leaves the member set. */
+	/** Tendrils sit well behind the edges, so they get a fraction of it. */
+	private tendrilOpacity(): number {
+		return this.palette.edgeOpacity * 0.3;
+	}
+
+	/**
+	 * Module focus: fade everything whose segment leaves the member set.
+	 *
+	 * Fading mixes the segment colour towards the canvas background instead
+	 * of scaling it by a factor: scaling keeps the hue and only loses energy,
+	 * so a dimmed particle stays as saturated as a focused one and the
+	 * focused module stops standing out.
+	 */
 	setFocusDim(members: Set<string> | null): void {
+		const bg = new Color(this.palette.background);
+		const mix = (c: Color, k: number, out: [number, number, number]): void => {
+			out[0] = bg.r + (c.r - bg.r) * k;
+			out[1] = bg.g + (c.g - bg.g) * k;
+			out[2] = bg.b + (c.b - bg.b) * k;
+		};
+		const rgb: [number, number, number] = [0, 0, 0];
 		for (let i = 0; i < this.segs.length; i++) {
 			const s = this.segs[i];
-			if (!members) {
-				this.dim[i] = 1;
-			} else if (s.kind === "tendril") {
-				this.dim[i] = members.has(s.bId) ? 1 : FOCUS_DIM_TENDRIL;
-			} else {
-				this.dim[i] =
-					s.aId !== null && members.has(s.aId) && members.has(s.bId)
-						? 1
-						: FOCUS_DIM_PARTICLE;
+			let k = 1;
+			if (members) {
+				if (s.kind === "tendril") k = members.has(s.bId) ? 1 : FOCUS_DIM_TENDRIL;
+				else if (s.aId === null || !members.has(s.aId) || !members.has(s.bId)) {
+					k = FOCUS_DIM_PARTICLE;
+				}
 			}
+			mix(s.color, k, rgb);
+			this.dimR[i] = rgb[0];
+			this.dimG[i] = rgb[1];
+			this.dimB[i] = rgb[2];
+			if (s.lineSlot >= 0) {
+				const lo = s.lineSlot * 6;
+				for (const v of [0, 1]) {
+					this.lineColArr[lo + v * 3] = rgb[0] * 0.5;
+					this.lineColArr[lo + v * 3 + 1] = rgb[1] * 0.5;
+					this.lineColArr[lo + v * 3 + 2] = rgb[2] * 0.5;
+				}
+			}
+		}
+		if (this.tendrils) {
+			const attr = this.tendrils.geometry.getAttribute("color") as
+				| BufferAttribute
+				| undefined;
+			if (attr) attr.needsUpdate = true;
 		}
 	}
 
@@ -269,12 +340,12 @@ export class FlowLayer {
 			const a = s.aIdx >= 0 ? nodes[s.aIdx] : s.fixedA;
 			const b = nodes[s.bIdx];
 			if (!a || !b) continue;
-			this.travel[i] += dt * FLOW_SPEED * this.accel[i];
+			if (this.motionEnabled) this.travel[i] += dt * FLOW_SPEED * this.accel[i];
 			const base = this.travel[i] * s.lenInv;
-			const dim = this.dim[i];
-			const cr = s.color.r;
-			const cg = s.color.g;
-			const cb = s.color.b;
+			const cr = this.dimR[i];
+			const cg = this.dimG[i];
+			const cb = this.dimB[i];
+			const floor = this.palette.minBright;
 			for (let k = 0; k < s.particles; k++) {
 				let t = base + k / s.particles;
 				t -= Math.floor(t);
@@ -282,8 +353,7 @@ export class FlowLayer {
 				this.posArr[o] = a.x + (b.x - a.x) * t;
 				this.posArr[o + 1] = a.y + (b.y - a.y) * t;
 				this.posArr[o + 2] = a.z + (b.z - a.z) * t;
-				const br =
-					(MIN_BRIGHT + (1 - MIN_BRIGHT) * Math.sin(Math.PI * t)) * dim;
+				const br = floor + (1 - floor) * Math.sin(Math.PI * t);
 				this.colArr[o] = cr * br;
 				this.colArr[o + 1] = cg * br;
 				this.colArr[o + 2] = cb * br;
@@ -334,7 +404,13 @@ export class FlowLayer {
 		this.tendrilMat = null;
 	}
 
-	private makeSprite(): CanvasTexture {
+	/**
+	 * Soft round sprite for the particles. Returns null in environments with
+	 * no DOM (headless tests): three renders the points as plain squares
+	 * instead, which is fine because nothing is being looked at.
+	 */
+	private makeSprite(): CanvasTexture | null {
+		if (typeof document === "undefined") return null;
 		const canvas = document.createElement("canvas");
 		canvas.width = canvas.height = 64;
 		const ctx = canvas.getContext("2d")!;

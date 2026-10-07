@@ -1,38 +1,45 @@
-// Minimal settings for Phase 1. Module rules live in data.json so they can be
-// edited by hand today and get a proper UI in Phase 3.
+// Plugin settings.
+//
+// Phase 1 shipped the two graph toggles; module rules still live in data.json
+// (the visual rule editor is a Phase 3 item). The motion preference is here
+// because prefers-reduced-motion is a Phase 2 acceptance point.
 
 import { Plugin, PluginSettingTab, App, Setting } from "obsidian";
 import { ModuleDef } from "../data/types";
 import { DEFAULT_MODULES } from "../data/modules";
-import type NeuralVaultPlugin from "../main";
+import { MOTION_OPTIONS, type MotionSetting } from "../render/motion";
+import type VaultBloomPlugin from "../main";
 
-export interface NeuralVaultSettings {
+export interface VaultBloomSettings {
 	modules: ModuleDef[];
 	/** show notes without any link (native graph "orphans" toggle) */
 	showOrphans: boolean;
 	/** show ghost nodes from unresolved links (knowledge gaps) */
 	showGhosts: boolean;
+	/** prefers-reduced-motion handling */
+	motion: MotionSetting;
 }
 
-export const DEFAULT_SETTINGS: NeuralVaultSettings = {
+export const DEFAULT_SETTINGS: VaultBloomSettings = {
 	modules: DEFAULT_MODULES,
 	showOrphans: false,
 	showGhosts: true,
+	motion: "system",
 };
 
-export async function loadSettings(plugin: Plugin): Promise<NeuralVaultSettings> {
-	const data = (await plugin.loadData()) as Partial<NeuralVaultSettings> | null;
+export async function loadSettings(plugin: Plugin): Promise<VaultBloomSettings> {
+	const data = (await plugin.loadData()) as Partial<VaultBloomSettings> | null;
 	return Object.assign({}, DEFAULT_SETTINGS, data);
 }
 
-export async function saveSettings(plugin: Plugin, settings: NeuralVaultSettings): Promise<void> {
+export async function saveSettings(plugin: Plugin, settings: VaultBloomSettings): Promise<void> {
 	await plugin.saveData(settings);
 }
 
-export class NeuralVaultSettingTab extends PluginSettingTab {
-	private plugin: NeuralVaultPlugin;
+export class VaultBloomSettingTab extends PluginSettingTab {
+	private plugin: VaultBloomPlugin;
 
-	constructor(app: App, plugin: NeuralVaultPlugin) {
+	constructor(app: App, plugin: VaultBloomPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
@@ -41,6 +48,8 @@ export class NeuralVaultSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 		containerEl.createEl("h2", { text: "Vault Bloom" });
+
+		containerEl.createEl("h3", { text: "Graph" });
 
 		new Setting(containerEl)
 			.setName("Show orphan notes")
@@ -64,20 +73,45 @@ export class NeuralVaultSettingTab extends PluginSettingTab {
 				})
 			);
 
+		containerEl.createEl("h3", { text: "Motion" });
+
+		new Setting(containerEl)
+			.setName("Animation")
+			.setDesc(
+				"The dashboard animates continuously (force layout, edge particles, " +
+				"camera flights and a slow orbit after you focus a note). " +
+				"\"Follow system\" honours your OS 'reduce motion' setting."
+			)
+			.addDropdown((dropdown) => {
+				for (const [value, label] of Object.entries(MOTION_OPTIONS)) {
+					dropdown.addOption(value, label);
+				}
+				dropdown.setValue(this.plugin.settings.motion).onChange(async (value) => {
+					this.plugin.settings.motion = value as MotionSetting;
+					await saveSettings(this.plugin, this.plugin.settings);
+					this.plugin.refreshGraph();
+				});
+			});
+
 		new Setting(containerEl)
 			.setName("Module rules")
 			.setDesc(
 				"Module grouping rules are stored in data.json under \"modules\". " +
 				"Each rule: { \"type\": \"path\" | \"tag\", \"value\": \"...\" }. " +
-				"Visual rule editor comes in Phase 3."
+				"First matching module wins, in list order."
 			)
 			.addButton((button) =>
-				button.setButtonText("Open data.json folder").onClick(() => {
-					// Best effort: open the plugin folder in the system file explorer.
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
-					const electron = (window as any).require?.("electron");
-					if (electron?.shell) {
-						electron.shell.showItemInFolder(this.plugin.manifest.dir + "/data.json");
+				button.setButtonText("Open plugin folder").onClick(() => {
+					// Best effort: reveal the plugin folder in the system file explorer.
+					const req = (window as unknown as {
+						require?: (module: string) => unknown;
+					}).require;
+					const electron = req?.("electron") as
+						| { shell?: { showItemInFolder(path: string): void } }
+						| undefined;
+					const dir = this.plugin.manifest.dir;
+					if (electron?.shell && dir) {
+						electron.shell.showItemInFolder(`${dir}/data.json`);
 					}
 				})
 			);

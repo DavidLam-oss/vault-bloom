@@ -9,6 +9,8 @@ export interface RendererOptions {
 	showOrphans: boolean;
 	/** show ghost nodes from unresolved links */
 	showGhosts: boolean;
+	/** suppress auto-orbit, camera flights and particle travel */
+	reducedMotion: boolean;
 }
 
 /** Payload for module-hub hover, so the view can label it. */

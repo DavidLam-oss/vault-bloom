@@ -122,8 +122,9 @@ export class FocusCard {
 			list.createEl("li", { text: "No backlinks yet." });
 		}
 
+		// nv-btn pins the studio button colours; see the reset note in styles.css.
 		const open = this.bodyEl.createEl("button", { text: "Open note" });
-		open.addClass("nv-fcard-open");
+		open.addClass("nv-btn", "nv-fcard-open");
 		open.addEventListener("click", () => {
 			if (node.path) void this.app.workspace.openLinkText(node.path, "");
 			else new Notice("Unresolved link - note not created yet.");

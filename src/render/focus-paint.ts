@@ -27,6 +27,66 @@ export interface LayoutView {
 const DIM_NODE = 0.1;
 const DIM_EDGE = 0.06;
 
+/**
+ * Dim everything outside the focused module.
+ *
+ * "Dim" means blend TOWARDS THE BACKGROUND, not multiply: on a dark canvas
+ * multiplying fades a node out, but on a light canvas it would make the node
+ * darker and louder - exactly backwards. Mixing towards the palette
+ * background degrades gracefully in both themes.
+ *
+ * `edgeBaseColors` is the per-vertex snapshot taken at scene build time.
+ */
+export function paintFocusDim(
+	members: Set<string>,
+	slots: ReadonlyArray<PaintSlot | null>,
+	noteBase: Float32Array,
+	ghostBase: Float32Array,
+	noteMesh: InstancedMesh | null,
+	ghostMesh: InstancedMesh | null,
+	layout: LayoutView,
+	edgeLines: LineSegments | null,
+	edgeBaseColors: Float32Array | null,
+	background: Color
+): void {
+	const scratch = new Color();
+	for (const slot of slots) {
+		if (!slot) continue;
+		const base = slot.mesh === "note" ? noteBase : ghostBase;
+		if (base.length === 0) continue;
+		const k = members.has(slot.node.id) ? 1 : DIM_NODE;
+		const o = slot.local * 3;
+		scratch.setRGB(
+			background.r + (base[o] - background.r) * k,
+			background.g + (base[o + 1] - background.g) * k,
+			background.b + (base[o + 2] - background.b) * k
+		);
+		(slot.mesh === "note" ? noteMesh : ghostMesh)?.setColorAt(slot.local, scratch);
+	}
+	if (noteMesh?.instanceColor) noteMesh.instanceColor.needsUpdate = true;
+	if (ghostMesh?.instanceColor) ghostMesh.instanceColor.needsUpdate = true;
+
+	if (edgeLines && edgeBaseColors) {
+		const attr = edgeLines.geometry.getAttribute("color") as
+			| BufferAttribute
+			| undefined;
+		if (attr) {
+			const arr = attr.array as Float32Array;
+			layout.edges.forEach((edge, i) => {
+				const a = layout.nodes[edge.source];
+				const b = layout.nodes[edge.target];
+				const keep = members.has(a.id) && members.has(b.id);
+				for (let v = 0; v < 6; v++) {
+					const base = edgeBaseColors[i * 6 + v];
+					const bg = v % 3 === 0 ? background.r : v % 3 === 1 ? background.g : background.b;
+					arr[i * 6 + v] = keep ? base : bg + (base - bg) * DIM_EDGE;
+				}
+			});
+			attr.needsUpdate = true;
+		}
+	}
+}
+
 /** All note ids of a module plus, when enabled, its adjacent ghost nodes. */
 export function focusMembers(
 	graph: NeuralGraph,
@@ -80,54 +140,4 @@ export function boundsOf(
 		if (d > radius) radius = d;
 	}
 	return { center, radius };
-}
-
-/**
- * Dim everything outside the focused module. Nodes not in `members` fade to
- * 14% of their base color; an edge fades to 8% when either endpoint left.
- * `edgeBaseColors` is the per-vertex snapshot taken at scene build time.
- */
-export function paintFocusDim(
-	members: Set<string>,
-	slots: ReadonlyArray<PaintSlot | null>,
-	noteBase: Float32Array,
-	ghostBase: Float32Array,
-	noteMesh: InstancedMesh | null,
-	ghostMesh: InstancedMesh | null,
-	layout: LayoutView,
-	edgeLines: LineSegments | null,
-	edgeBaseColors: Float32Array | null
-): void {
-	for (const slot of slots) {
-		if (!slot) continue;
-		const base = slot.mesh === "note" ? noteBase : ghostBase;
-		if (base.length === 0) continue;
-		const k = members.has(slot.node.id) ? 1 : DIM_NODE;
-		const color = new Color(
-			base[slot.local * 3] * k,
-			base[slot.local * 3 + 1] * k,
-			base[slot.local * 3 + 2] * k
-		);
-		(slot.mesh === "note" ? noteMesh : ghostMesh)?.setColorAt(slot.local, color);
-	}
-	if (noteMesh?.instanceColor) noteMesh.instanceColor.needsUpdate = true;
-	if (ghostMesh?.instanceColor) ghostMesh.instanceColor.needsUpdate = true;
-
-	if (edgeLines && edgeBaseColors) {
-		const attr = edgeLines.geometry.getAttribute("color") as
-			| BufferAttribute
-			| undefined;
-		if (attr) {
-			const arr = attr.array as Float32Array;
-			layout.edges.forEach((edge, i) => {
-				const a = layout.nodes[edge.source];
-				const b = layout.nodes[edge.target];
-				const k = members.has(a.id) && members.has(b.id) ? 1 : DIM_EDGE;
-				for (let v = 0; v < 6; v++) {
-					arr[i * 6 + v] = edgeBaseColors[i * 6 + v] * k;
-				}
-			});
-			attr.needsUpdate = true;
-		}
-	}
 }

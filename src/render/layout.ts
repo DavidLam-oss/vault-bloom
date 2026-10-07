@@ -57,6 +57,13 @@ export class ForceLayout {
 	private lastMaxSize = 1;
 	/** hub positions of the most recent update(), exposed for hub rendering */
 	private lastHubs = new Map<string, Hub>();
+	/**
+	 * True once the simulation has cooled down and been harvested. Without
+	 * this the render loop would keep calling sim.tick() + harvest() forever
+	 * (alpha decays towards 0 but never reaches it), burning a full O(nodes)
+	 * cache write every frame on a graph that is not moving.
+	 */
+	private settled = true;
 
 	/**
 	 * (Re)build the simulation for the current visible subgraph.
@@ -66,6 +73,7 @@ export class ForceLayout {
 	update(graph: NeuralGraph, visibleIds: Set<string>): void {
 		this.sim?.stop();
 		this.sim = null;
+		this.settled = false;
 
 		const byId = new Map<string, GraphNode>();
 		for (const node of graph.nodes) byId.set(node.id, node);
@@ -176,21 +184,29 @@ export class ForceLayout {
 			ticks++;
 		}
 		this.harvest();
+		this.settled = true;
 	}
 
-	/** Advance one tick; returns true while the layout is still hot. */
+	/**
+	 * Advance one tick; returns true while the layout is still hot. Once the
+	 * simulation has cooled this is a cheap no-op so the render loop can call
+	 * it unconditionally.
+	 */
 	tick(): boolean {
-		if (!this.sim) return false;
+		if (!this.sim || this.settled) return false;
 		this.sim.tick();
 		if (this.sim.alpha() < ALPHA_STOP) {
 			this.harvest();
+			this.settled = true;
+			this.sim.stop();
 			return false;
 		}
 		return true;
 	}
 
+	/** True while the layout has not been built or has already cooled down. */
 	isCold(): boolean {
-		return this.sim === null;
+		return this.sim === null || this.settled;
 	}
 
 	/** Store settled positions into the cache and unpin everything. */

@@ -1,61 +1,70 @@
-/* Neural Vault - minimal styles for the debug view (Phase 1) */
+/* Vault Bloom - dashboard styles.
+ *
+ * The view is a fixed DARK studio, on purpose. The canvas draws glowing
+ * note-dots, jellyfish hubs and travelling light - all additive-blended - and
+ * none of that survives on a light surface: the glow saturates to white, the
+ * bell turns into a grey blob and the node colours lose their contrast. So
+ * neither the canvas nor the chrome floating above it follows the Obsidian
+ * theme; everything here reads from the --nv-* tokens below (see
+ * src/render/palette.ts for the full rationale).
+ *
+ * Obsidian's own chrome around this view (tab header, sidebars, status bar)
+ * still follows the user's theme - only this view's surface is dark.
+ *
+ * Layout principle: the canvas IS the product, so it fills the view and all
+ * chrome floats on top of it. Debug numbers live in a collapsed <details>. */
 
-.nv-stats {
+/* --- shell ------------------------------------------------------------- */
+
+.nv-root {
+	/* Studio tokens. Deliberately NOT derived from Obsidian's variables. */
+	--nv-surface: #151c2b;
+	--nv-surface-hover: #1e2739;
+	--nv-border: #2a3348;
+	--nv-border-strong: #3f4d6b;
+	--nv-text: #d7e0f2;
+	--nv-text-muted: #8b98b4;
+	--nv-text-faint: #64708c;
+	--nv-accent: #9db4e6;
+	/* Pre-hydration default; ThreeRenderer.mount() overwrites this with the
+	 * palette's own background, so the two can never drift apart. */
+	--nv-canvas-bg: #0b0f17;
+
 	display: flex;
-	gap: 16px;
-	flex-wrap: wrap;
-	margin: 12px 0;
+	flex-direction: column;
+	gap: 8px;
+	height: 100%;
+	min-height: 0;
+	/* the whole view surface, not just the canvas box */
+	background-color: var(--nv-canvas-bg);
+	/* Base text colour too: anything without its own rule (the details <h4>,
+	 * for one) would otherwise inherit the host theme's text colour and turn
+	 * unreadable the moment the user picks a light theme. */
+	color: var(--nv-text);
 }
 
-.nv-stat {
-	padding: 8px 14px;
-	border-radius: 8px;
-	background-color: var(--background-secondary);
-	border: 1px solid var(--background-modifier-border);
+/* Obsidian themes style bare <button>, <a> and scrollbars globally, through
+ * variables (--interactive-normal, --link-color, --scrollbar-thumb) that flip
+ * with the theme. Inside the studio those would arrive wearing the host
+ * theme's colours. This reset is written at ZERO specificity (:where), so
+ * every class rule below still wins - it only catches elements that would
+ * otherwise have no studio styling at all. */
+:where(.nv-root) :where(button, a) {
+	color: inherit;
+	background-color: transparent;
+	border: none;
+	box-shadow: none;
 }
-
-.nv-stat .nv-stat-value {
-	font-size: 1.4em;
-	font-weight: 600;
-}
-
-.nv-stat .nv-stat-label {
-	color: var(--text-muted);
-	font-size: 0.85em;
-}
-
-.nv-module-table {
-	width: 100%;
-	border-collapse: collapse;
-	margin: 8px 0 16px;
-}
-
-.nv-module-table th,
-.nv-module-table td {
-	text-align: left;
-	padding: 6px 10px;
-	border-bottom: 1px solid var(--background-modifier-border);
-}
-
-.nv-module-dot {
-	display: inline-block;
-	width: 10px;
-	height: 10px;
-	border-radius: 50%;
-	margin-right: 8px;
-	vertical-align: middle;
-}
-
-/* --- neural canvas ----------------------------------------------------- */
 
 .nv-canvas-wrap {
 	position: relative;
-	height: 56vh;
-	min-height: 340px;
+	flex: 1 1 auto;
+	min-height: 360px;
 	border-radius: 12px;
 	overflow: hidden;
-	border: 1px solid var(--background-modifier-border);
-	margin-bottom: 12px;
+	border: 1px solid var(--nv-border);
+	/* the renderer paints its own background; this is the pre-first-frame tint */
+	background-color: var(--nv-canvas-bg);
 }
 
 .nv-canvas-host {
@@ -67,74 +76,227 @@
 	display: block;
 }
 
-.nv-hoverbar {
-	position: absolute;
-	left: 10px;
-	bottom: 10px;
-	z-index: 2;
-	padding: 6px 12px;
-	border-radius: 8px;
-	background-color: rgba(11, 15, 23, 0.78);
-	color: #c8d3e8;
-	font-size: 0.85em;
-	pointer-events: none;
-	max-width: calc(100% - 20px);
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
+/* --- floating chrome ---------------------------------------------------- */
 
-.nv-hoverbar-active {
-	color: #ffffff;
-}
-
-.nv-backbtn {
+.nv-toolbar {
 	position: absolute;
 	top: 10px;
 	left: 10px;
+	right: 10px;
 	z-index: 3;
-	display: none;
-	padding: 5px 12px;
-	border-radius: 8px;
-	border: 1px solid rgba(96, 116, 156, 0.45);
-	background-color: rgba(11, 15, 23, 0.78);
-	color: #c8d3e8;
-	font-size: 0.85em;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-wrap: wrap;
+	pointer-events: none;
+}
+
+.nv-toolbar > * {
+	pointer-events: auto;
+}
+
+.nv-toolbar-spacer {
+	flex: 1 1 auto;
+	min-width: 8px;
+}
+
+.nv-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 4px 10px;
+	border-radius: 7px;
+	border: 1px solid var(--nv-border);
+	background-color: var(--nv-surface);
+	color: var(--nv-text-muted);
+	font-size: 0.78em;
+	line-height: 1.6;
 	cursor: pointer;
 	user-select: none;
+	opacity: 0.92;
+	transition: color 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+}
+
+.nv-btn:hover {
+	color: var(--nv-text);
+	border-color: var(--nv-border-strong);
+	opacity: 1;
+}
+
+.nv-toggle[aria-pressed="true"],
+.nv-toggle-on {
+	color: var(--nv-text);
+	border-color: var(--nv-border-strong);
+	background-color: var(--nv-surface-hover);
+}
+
+.nv-backbtn {
+	display: none;
+	color: var(--nv-text);
 }
 
 .nv-backbtn.nv-visible {
-	display: block;
+	display: inline-flex;
 }
 
-.nv-backbtn:hover {
-	color: #ffffff;
-	border-color: #8fa2c8;
-}
-
-.nv-module-table tr.nv-module-row {
-	cursor: pointer;
-}
-
-.nv-module-table tr.nv-module-row:hover td {
-	background-color: var(--background-secondary);
-}
-
-.nv-actions {
+/* module legend - the primary "which cluster is which" control */
+.nv-legend {
+	position: absolute;
+	left: 10px;
+	bottom: 10px;
+	z-index: 3;
 	display: flex;
-	gap: 8px;
-	margin: 8px 0;
+	flex-wrap: wrap;
+	gap: 5px;
+	max-width: calc(100% - 20px);
+}
+
+.nv-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 9px;
+	border-radius: 999px;
+	border: 1px solid transparent;
+	background-color: var(--nv-surface);
+	color: var(--nv-text-muted);
+	font-size: 0.76em;
+	cursor: pointer;
+	opacity: 0.9;
+	transition: color 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+}
+
+.nv-chip:hover {
+	color: var(--nv-text);
+	border-color: var(--nv-border);
+	opacity: 1;
+}
+
+.nv-chip-focused {
+	color: var(--nv-text);
+	border-color: currentColor;
+	opacity: 1;
+}
+
+.nv-chip-count {
+	color: var(--nv-text-faint);
+	font-variant-numeric: tabular-nums;
+}
+
+.nv-dot {
+	display: inline-block;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	box-shadow: 0 0 6px currentColor;
+}
+
+.nv-hoverbar {
+	position: absolute;
+	left: 50%;
+	transform: translateX(-50%);
+	bottom: 10px;
+	z-index: 2;
+	max-width: min(60%, 560px);
+	padding: 5px 12px;
+	border-radius: 999px;
+	border: 1px solid transparent;
+	background-color: var(--nv-surface);
+	color: var(--nv-text-muted);
+	font-size: 0.78em;
+	text-align: center;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	pointer-events: none;
+	opacity: 0.85;
+	transition: color 0.12s ease, opacity 0.12s ease;
+}
+
+/* the legend sits in the bottom-left, so keep the read-out clear of it */
+.nv-legend ~ .nv-hoverbar {
+	left: auto;
+	right: 10px;
+	transform: none;
+}
+
+.nv-hoverbar-active {
+	color: var(--nv-text);
+	opacity: 1;
+}
+
+/* --- details drawer ----------------------------------------------------- */
+
+.nv-details {
+	flex: 0 0 auto;
+	border: 1px solid var(--nv-border);
+	border-radius: 10px;
+	padding: 0 12px;
+	background-color: var(--nv-surface);
+}
+
+.nv-details > summary {
+	cursor: pointer;
+	padding: 7px 0;
+	color: var(--nv-text-muted);
+	font-size: 0.82em;
+	user-select: none;
+}
+
+.nv-details[open] > summary {
+	border-bottom: 1px solid var(--nv-border);
+	margin-bottom: 8px;
+}
+
+.nv-details > h4 {
+	margin: 4px 0 0;
+	color: var(--nv-text-muted);
+	font-size: 0.82em;
+	font-weight: 600;
+}
+
+.nv-stats {
+	display: flex;
+	gap: 16px;
+	flex-wrap: wrap;
+	margin: 10px 0;
+}
+
+.nv-stat {
+	padding: 6px 12px;
+	border-radius: 8px;
+	/* inset against the panel, so the numbers read as the recessed layer */
+	background-color: var(--nv-canvas-bg);
+	border: 1px solid var(--nv-border);
+}
+
+.nv-stat-value {
+	font-size: 1.25em;
+	font-weight: 600;
+	color: var(--nv-text);
+}
+
+.nv-stat-label {
+	color: var(--nv-text-muted);
+	font-size: 0.8em;
 }
 
 .nv-top-list {
 	columns: 2;
 	column-gap: 24px;
-	margin: 8px 0 16px;
+	margin: 8px 0 14px;
 	padding-left: 20px;
+	font-size: 0.86em;
+	color: var(--nv-text-muted);
 }
 
-/* --- focus card (selected note info) --------------------------------- */
+.nv-top-list a,
+.nv-top-list a:hover {
+	color: var(--nv-text);
+}
+
+/* --- focus card (selected note) ---------------------------------------- */
+
 .nv-fcard {
 	position: absolute;
 	top: 14px;
@@ -142,11 +304,11 @@
 	width: 250px;
 	max-height: calc(100% - 28px);
 	overflow-y: auto;
-	background: var(--background-secondary);
-	border: 1px solid var(--background-modifier-border);
+	background: var(--nv-surface);
+	border: 1px solid var(--nv-border);
 	border-radius: 10px;
-	box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
-	backdrop-filter: blur(6px);
+	box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+	color: var(--nv-text);
 	font-size: 12px;
 	z-index: 10;
 	opacity: 0;
@@ -167,7 +329,7 @@
 	justify-content: space-between;
 	gap: 6px;
 	padding: 8px 10px;
-	border-bottom: 1px solid var(--background-modifier-border);
+	border-bottom: 1px solid var(--nv-border);
 	cursor: grab;
 	user-select: none;
 }
@@ -199,7 +361,7 @@
 }
 
 .nv-fcard-meta {
-	color: var(--text-muted);
+	color: var(--nv-text-muted);
 	margin-bottom: 6px;
 }
 
@@ -211,21 +373,21 @@
 }
 
 .nv-fcard-tags span {
-	background: var(--background-modifier-hover);
+	background: var(--nv-surface-hover);
 	border-radius: 4px;
 	padding: 1px 6px;
-	color: var(--text-accent);
+	color: var(--nv-accent);
 }
 
 .nv-fcard-snippet {
-	color: var(--text-normal);
+	color: var(--nv-text);
 	line-height: 1.45;
 	margin-bottom: 8px;
 	white-space: normal;
 }
 
 .nv-fcard-section {
-	color: var(--text-muted);
+	color: var(--nv-text-muted);
 	text-transform: uppercase;
 	letter-spacing: 0.04em;
 	font-size: 10px;
@@ -237,6 +399,43 @@
 	padding-left: 16px;
 }
 
+.nv-fcard-backlinks a {
+	color: var(--nv-accent);
+	text-decoration: none;
+}
+
+.nv-fcard-backlinks a:hover {
+	text-decoration: underline;
+}
+
+/* carries .nv-btn for the studio button look, stretched to the card width */
 .nv-fcard-open {
 	width: 100%;
+	justify-content: center;
+}
+
+/* the card is the only scrollable surface in the view, and scrollbars are
+ * themed globally by Obsidian (--scrollbar-thumb) */
+.nv-fcard::-webkit-scrollbar {
+	width: 8px;
+}
+
+.nv-fcard::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.nv-fcard::-webkit-scrollbar-thumb {
+	background-color: var(--nv-border-strong);
+	border-radius: 4px;
+}
+
+/* --- reduced motion ----------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+	.nv-btn,
+	.nv-chip,
+	.nv-hoverbar,
+	.nv-fcard {
+		transition: none;
+	}
 }

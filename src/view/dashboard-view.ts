@@ -1,11 +1,25 @@
-// Dashboard view - stats + module distribution + the three.js neural canvas.
+// Dashboard view - a thin Obsidian adapter.
+//
+// The chrome lives in dashboard-chrome.ts (plain DOM, reusable by the
+// preview harness) and the drawing lives in ThreeRenderer. This file only
+// wires them together and translates plugin state into chrome updates.
+//
 // The renderer instance persists across graph rebuilds so the node position
-// cache in its layout survives (no jump on note edits).
+// cache in its layout survives - that is what stops the graph jumping when a
+// note is edited.
 
 import { ItemView, Notice, WorkspaceLeaf } from "obsidian";
-import type NeuralVaultPlugin from "../main";
+import type VaultBloomPlugin from "../main";
 import { GraphNode } from "../data/types";
 import { ThreeRenderer } from "../render/three-renderer";
+import { resolveReducedMotion } from "../render/motion";
+import {
+	buildChrome,
+	type ChromeModuleRow,
+	type ChromeStats,
+	type ChromeTopNote,
+	type DashboardChrome,
+} from "./dashboard-chrome";
 import { FocusCard } from "./focus-card";
 import type { HubHoverInfo, RendererOptions } from "../render/renderer";
 
@@ -14,17 +28,12 @@ export const VIEW_TYPE_VAULT_BLOOM = "vault-bloom-dashboard";
 const TOP_LINKED = 15;
 
 export class DashboardView extends ItemView {
-	private plugin: NeuralVaultPlugin;
+	private plugin: VaultBloomPlugin;
 	private renderer: ThreeRenderer | null = null;
-	private skeletonBuilt = false;
-	private statValues = new Map<string, HTMLElement>();
-	private moduleTableBody: HTMLElement | null = null;
-	private topListEl: HTMLElement | null = null;
-	private hoverBar: HTMLElement | null = null;
-	private backBtn: HTMLElement | null = null;
+	private chrome: DashboardChrome | null = null;
 	private focusCard: FocusCard | null = null;
 
-	constructor(leaf: WorkspaceLeaf, plugin: NeuralVaultPlugin) {
+	constructor(leaf: WorkspaceLeaf, plugin: VaultBloomPlugin) {
 		super(leaf);
 		this.plugin = plugin;
 	}
@@ -42,7 +51,10 @@ export class DashboardView extends ItemView {
 	}
 
 	async onOpen(): Promise<void> {
-		this.renderDebug();
+		// No "css-change" listener on purpose: the canvas is a fixed dark
+		// studio (see src/render/palette.ts), so a theme switch cannot change
+		// anything this view draws.
+		this.refresh();
 	}
 
 	async onClose(): Promise<void> {
@@ -50,35 +62,36 @@ export class DashboardView extends ItemView {
 		this.focusCard = null;
 		this.renderer?.dispose();
 		this.renderer = null;
-		this.contentEl.empty();
+		this.chrome = null;
+		this.contentEl.classList.remove("nv-root");
 	}
 
-	/** Build the skeleton once, then refresh numbers + renderer data. */
-	renderDebug(): void {
+	/** Build the chrome once, then keep pushing fresh data into it. */
+	refresh(): void {
 		const graph = this.plugin.currentGraph;
 		if (!graph) {
-			this.contentEl.createEl("p", { text: "Graph not built yet." });
+			this.contentEl.textContent = "Graph not built yet.";
 			return;
 		}
-		if (!this.skeletonBuilt) {
-			this.buildSkeleton();
-			this.skeletonBuilt = true;
-		}
-		this.refreshData();
+		if (!this.chrome) this.build();
+		this.pushData();
 	}
 
-	private buildSkeleton(): void {
-		const { contentEl } = this;
-		contentEl.empty();
-
-		// Canvas first: the dashboard is a renderer with stats underneath.
-		const canvasWrap = contentEl.createDiv("nv-canvas-wrap");
-		this.hoverBar = canvasWrap.createDiv("nv-hoverbar");
-		this.hoverBar.setText("Left-drag rotate · Cmd/right-drag pan · Scroll zoom to cursor · Click note to fly · Double-click to open");
-
-		this.backBtn = canvasWrap.createDiv("nv-backbtn");
-		this.backBtn.setText("← Back to overview (Esc)");
-		this.backBtn.addEventListener("click", () => this.renderer?.clearFocus());
+	private build(): void {
+		const chrome = buildChrome(this.contentEl, {
+			onFocusModule: (moduleId) => this.renderer?.focusModule(moduleId),
+			onClearFocus: () => this.renderer?.clearFocus(),
+			onFitView: () => this.renderer?.fitView(),
+			onRebuild: () => {
+				this.plugin.rebuildGraph();
+				this.pushData();
+				new Notice("Vault Bloom: graph rebuilt");
+			},
+			onToggleGhosts: (value) => void this.plugin.updateSettings({ showGhosts: value }),
+			onToggleOrphans: (value) => void this.plugin.updateSettings({ showOrphans: value }),
+			onOpenNote: (path) => void this.app.workspace.openLinkText(path, ""),
+		});
+		this.chrome = chrome;
 
 		this.renderer = new ThreeRenderer({
 			onNodeOpen: (node) => this.openNode(node),
@@ -87,100 +100,56 @@ export class DashboardView extends ItemView {
 			onHubHover: (hub) => this.showHubHover(hub),
 			onNodeFocused: (node) => this.showFocusCard(node),
 		});
-		this.renderer.mount(canvasWrap);
-		this.focusCard = new FocusCard(this.app, canvasWrap);
-
-		const header = contentEl.createDiv("nv-header");
-		header.createEl("h3", { text: "Vault Bloom - data layer debug" });
-
-		const stats = contentEl.createDiv("nv-stats");
-		for (const [key, label] of [
-			["notes", "notes"],
-			["links", "links"],
-			["ghosts", "ghosts"],
-			["orphans", "orphans"],
-			["build", "build time"],
-		] as const) {
-			const box = stats.createDiv("nv-stat");
-			const value = box.createDiv("nv-stat-value");
-			box.createDiv("nv-stat-label").setText(label);
-			this.statValues.set(key, value);
-		}
-
-		const actions = contentEl.createDiv("nv-actions");
-		const refresh = actions.createEl("button", { text: "Rebuild now" });
-		refresh.addEventListener("click", () => {
-			this.plugin.rebuildGraph();
-			this.renderDebug();
-			new Notice("Vault Bloom: graph rebuilt");
-		});
-		const fit = actions.createEl("button", { text: "Fit view" });
-		fit.addEventListener("click", () => this.renderer?.fitView());
-
-		contentEl.createEl("h4", { text: "Modules" });
-		const table = contentEl.createEl("table", { cls: "nv-module-table" });
-		const head = table.createEl("tr");
-		head.createEl("th", { text: "Module" });
-		head.createEl("th", { text: "Nodes" });
-		this.moduleTableBody = table;
-
-		contentEl.createEl("h4", { text: "Most linked notes" });
-		this.topListEl = contentEl.createEl("ul", { cls: "nv-top-list" });
+		this.renderer.mount(chrome.canvasWrap);
+		this.focusCard = new FocusCard(this.app, chrome.canvasWrap);
 	}
 
-	private refreshData(): void {
+	private pushData(): void {
 		const graph = this.plugin.currentGraph;
-		if (!graph) return;
+		const chrome = this.chrome;
+		if (!graph || !chrome) return;
+
 		const s = graph.snapshot;
-		this.statValues.get("notes")?.setText(String(s.noteCount));
-		this.statValues.get("links")?.setText(String(s.edgeCount));
-		this.statValues.get("ghosts")?.setText(String(s.ghostCount));
-		this.statValues.get("orphans")?.setText(String(s.orphanCount));
-		this.statValues.get("build")?.setText(s.buildMs + "ms");
+		const stats: ChromeStats = {
+			notes: s.noteCount,
+			links: s.edgeCount,
+			ghosts: s.ghostCount,
+			orphans: s.orphanCount,
+			buildMs: s.buildMs,
+		};
+		chrome.setStats(stats);
 
-		if (this.moduleTableBody) {
-			this.moduleTableBody.empty();
-			for (const def of graph.modules) {
-				const row = this.moduleTableBody.createEl("tr", { cls: "nv-module-row" });
-				row.addEventListener("click", () => this.renderer?.focusModule(def.id));
-				const nameCell = row.createEl("td");
-				const dot = nameCell.createEl("span", { cls: "nv-module-dot" });
-				dot.style.backgroundColor = def.color;
-				nameCell.appendText(def.name);
-				row.createEl("td", { text: String(graph.moduleCounts[def.id] ?? 0) });
-			}
-		}
+		const rows: ChromeModuleRow[] = graph.modules
+			.map((def) => ({
+				id: def.id,
+				name: def.name,
+				color: def.color,
+				count: graph.moduleCounts[def.id] ?? 0,
+			}))
+			.filter((row) => row.count > 0)
+			.sort((a, b) => b.count - a.count);
+		chrome.setModules(rows);
 
-		if (this.renderer) {
-			this.renderer.setData(graph, this.rendererOptions());
-		}
+		const top: ChromeTopNote[] = graph.nodes
+			.filter((n) => n.kind === "note" && n.degree > 0)
+			.sort((a, b) => b.degree - a.degree)
+			.slice(0, TOP_LINKED)
+			.map((n) => ({ title: n.title, path: n.path, degree: n.degree }));
+		chrome.setTopNotes(top);
 
-		// Most connected notes (verification: these should match the hubs you see).
-		if (this.topListEl) {
-			this.topListEl.empty();
-			const top = graph.nodes
-				.filter((n) => n.kind === "note" && n.degree > 0)
-				.sort((a, b) => b.degree - a.degree)
-				.slice(0, TOP_LINKED);
-			for (const node of top) {
-				const li = this.topListEl.createEl("li");
-				const link = li.createEl("a", { text: `${node.title} (${node.degree})` });
-				link.href = "#";
-				link.addEventListener("click", (e) => {
-					e.preventDefault();
-					void this.app.workspace.openLinkText(node.path, "");
-				});
-			}
-			if (top.length === 0) {
-				this.topListEl.createEl("li", { text: "No linked notes found." });
-			}
-		}
+		chrome.setToggles({
+			showGhosts: this.plugin.settings.showGhosts,
+			showOrphans: this.plugin.settings.showOrphans,
+		});
+
+		this.renderer?.setData(graph, this.rendererOptions());
 	}
 
 	private rendererOptions(): RendererOptions {
 		return {
 			showOrphans: this.plugin.settings.showOrphans,
 			showGhosts: this.plugin.settings.showGhosts,
+			reducedMotion: resolveReducedMotion(this.plugin.settings.motion),
 		};
 	}
 
@@ -200,15 +169,17 @@ export class DashboardView extends ItemView {
 		this.focusCard?.show(node);
 	}
 
+	/** Idle read-out: while a module is focused, keep saying so. */
+	private idleHoverText(): string | null {
+		const focused = this.renderer?.getFocusedModule();
+		if (!focused) return null;
+		const def = this.plugin.currentGraph?.modules.find((m) => m.id === focused);
+		return `Focused: ${def?.name ?? focused} · Esc or "Overview" to go back`;
+	}
+
 	private showHover(node: GraphNode | null): void {
-		if (!this.hoverBar) return;
 		if (!node) {
-			this.hoverBar.setText(
-				this.renderer?.getFocusedModule()
-					? "Module focus - click the hub again or press Esc to go back"
-					: "Hover a node to inspect it"
-			);
-			this.hoverBar.removeClass("nv-hoverbar-active");
+			this.chrome?.setHover(this.idleHoverText());
 			return;
 		}
 		const moduleDef = this.plugin.currentGraph?.modules.find(
@@ -216,20 +187,13 @@ export class DashboardView extends ItemView {
 		);
 		const label = node.kind === "ghost"
 			? `ghost - ${node.title}`
-			: `${node.title} - ${moduleDef?.name ?? node.moduleId} - ${node.degree} links`;
-		this.hoverBar.setText(label);
-		this.hoverBar.addClass("nv-hoverbar-active");
+			: `${node.title} · ${moduleDef?.name ?? node.moduleId} · ${node.degree} links`;
+		this.chrome?.setHover(label);
 	}
 
 	private showHubHover(hub: HubHoverInfo | null): void {
-		if (!this.hoverBar) return;
 		if (!hub) {
-			this.hoverBar.setText(
-				this.renderer?.getFocusedModule()
-					? "Module focus - click the hub again or press Esc to go back"
-					: "Hover a node to inspect it"
-			);
-			this.hoverBar.removeClass("nv-hoverbar-active");
+			this.chrome?.setHover(this.idleHoverText());
 			return;
 		}
 		const focused = this.renderer?.getFocusedModule();
@@ -238,20 +202,13 @@ export class DashboardView extends ItemView {
 			: focused
 				? "click to switch module"
 				: "click to focus";
-		this.hoverBar.setText(`Module: ${hub.name} · ${hub.count} notes · ${action}`);
-		this.hoverBar.addClass("nv-hoverbar-active");
+		this.chrome?.setHover(`${hub.name} · ${hub.count} notes · ${action}`);
 	}
 
 	private onFocusChange(moduleId: string | null): void {
-		this.backBtn?.toggleClass("nv-visible", moduleId !== null);
-		if (moduleId && this.hoverBar) {
-			const def = this.plugin.currentGraph?.modules.find(
-				(m) => m.id === moduleId
-			);
-			this.hoverBar.setText(
-				`Focused: ${def?.name ?? moduleId} · Esc or "Back" to return`
-			);
-			this.hoverBar.addClass("nv-hoverbar-active");
-		}
+		const def = moduleId
+			? this.plugin.currentGraph?.modules.find((m) => m.id === moduleId)
+			: undefined;
+		this.chrome?.setFocused(moduleId, def?.name ?? moduleId ?? "");
 	}
 }
