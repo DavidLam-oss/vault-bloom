@@ -4,5 +4,6 @@ data.json
 *.map
 .DS_Store
 scripts/.layout-smoke.cjs
+scripts/preview/.out/
 docs/
 .workbuddy/
